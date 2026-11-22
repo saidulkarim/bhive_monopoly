@@ -1,0 +1,52 @@
+{
+  "@@locale": "en",
+  "tagline": "Own the streets. Build your empire.",
+  "player": "Player",
+  "welcome": "Welcome, {name}",
+  "@welcome": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "profileIntro": "Choose a name and avatar for your seat at the table.",
+  "editProfile": "My profile",
+  "startingBalance": "Starting balance",
+  "balanceExplanation": "Every player starts with the same balance. Your language changes the display, while game values stay the same.",
+  "howToPlay": "How to play",
+  "displayName": "Display name",
+  "nameValidation": "Enter a name with 2 to 40 characters.",
+  "chooseAvatar": "Choose your avatar",
+  "avatarName": "Avatar {number}",
+  "@avatarName": {
+    "placeholders": {
+      "number": {
+        "type": "int",
+        "format": "decimalPattern"
+      }
+    }
+  },
+  "choosePhoto": "Choose photo",
+  "takePhoto": "Take photo",
+  "removePhoto": "Remove photo",
+  "photoHint": "Choose a JPG or PNG image up to 10 MB. Your photo is cropped to a square and saved on this device.",
+  "photoError": "Could not open that photo. Try a JPG or PNG under 10 MB, and check photo or camera access.",
+  "saveProfile": "Save profile",
+  "profileSaved": "Profile saved.",
+  "saveError": "Could not save your changes. Please try again.",
+  "ruleGoalTitle": "The goal",
+  "ruleGoal": "Buy property, collect rent, and remain solvent. The last player left after all opponents become bankrupt wins.",
+  "ruleTurnTitle": "Turns and movement",
+  "ruleTurn": "Roll two dice and move clockwise. Collect $200 when passing or landing on GO. Doubles give another roll after the landing action; three consecutive doubles send you directly to Jail without a GO payment.",
+  "rulePropertyTitle": "Property and rent",
+  "ruleProperty": "Buy an unowned property at its printed price or send it to auction, starting at $10. All active players may bid. Rent follows the title deed. An undeveloped street in a complete color set normally earns double rent. Mortgaged property earns none.",
+  "ruleBuildingsTitle": "Houses and hotels",
+  "ruleBuildings": "Build evenly across a complete color set, with no mortgages in that set. Four houses on every street are required before upgrading to hotels. There are 32 houses and 12 hotels. Sell buildings evenly to the bank for half their purchase cost.",
+  "ruleJailTitle": "Jail",
+  "ruleJail": "Pay $50, use a Get Out of Jail Free card, or try to roll doubles for up to three turns. Escape doubles allow movement but no extra roll. After a third failed attempt, pay $50 and move using that roll. You can still collect rent and manage property while in Jail.",
+  "ruleDebtTitle": "Debt and trading",
+  "ruleDebt": "Raise money through legal deals, building sales, or mortgages before declaring bankruptcy. Remove all buildings in a color set before trading or mortgaging a street. Unmortgaging costs the mortgage value plus 10%. Players cannot lend each other money.",
+  "ruleParkingTitle": "Free Parking",
+  "ruleParking": "Free Parking has no cash reward. Taxes and fines go to the bank, with no jackpot in the center of the board."
+}

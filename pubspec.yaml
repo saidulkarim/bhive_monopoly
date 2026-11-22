@@ -1,0 +1,67 @@
+name: monopoly
+description: "A new Flutter project."
+publish_to: "none" # Remove this line if you wish to publish to pub.dev
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_riverpod: ^2.6.1
+  shared_preferences: ^2.5.6
+  image_picker: ^1.2.4
+  path_provider: ^2.1.6
+  flutter_localizations:
+    sdk: flutter
+  intl: any
+  image: ^4.13.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+  generate: true
+
+  assets:
+    - assets/icons/app_icon.png
+
+  fonts:
+    - family: Exo2
+      fonts:
+        - asset: assets/fonts/Exo2-Thin.ttf
+          weight: 100
+        - asset: assets/fonts/Exo2-Light.ttf
+          weight: 300
+        - asset: assets/fonts/Exo2-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Exo2-Italic.ttf
+          style: italic
+        - asset: assets/fonts/Exo2-Bold.ttf
+          weight: 700
+
+    - family: Nikosh
+      fonts:
+        - asset: assets/fonts/Nikosh.ttf
+
+    - family: NikoshBAN
+      fonts:
+        - asset: assets/fonts/NikoshBAN.ttf
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/icons/app_icon.png
+
+  web:
+    generate: true
+    image_path: assets/icons/app_icon.png
+    background_color: "#0B1011"
+    theme_color: "#0B1011"
