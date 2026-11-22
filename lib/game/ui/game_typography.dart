@@ -4,7 +4,7 @@ import '../../core/fonts/font_preferences.dart';
 
 /// Kept as a compatibility wrapper for existing GameSetup, Board and LAN
 /// routes from Phases 2–5. Uses the user's saved default instead of
-/// hardcoding Hadi/Exo2 on every screen.
+/// hardcoding Karnaphuli/Exo2 on every screen.
 class GameTypography extends StatelessWidget {
   const GameTypography({
     super.key,

@@ -2,6 +2,7 @@ import 'dart:math';
 
 import '../core/board_data.dart';
 import '../models/game_models.dart';
+import '../validation/game_snapshot_validator.dart';
 
 /// Deterministic, Flutter-independent turn engine. Roll values are injected by
 /// callers so gameplay can be unit-tested without relying on random dice.
@@ -815,6 +816,7 @@ class GameEngine {
 
   static GameEngine importSave(Map<String, dynamic> json) {
     try {
+      GameSnapshotValidator.validateOffline(json);
       if (json['schema'] != 1) {
         throw const FormatException('Unsupported saved game version.');
       }

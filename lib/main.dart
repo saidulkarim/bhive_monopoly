@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/theme/app_theme.dart';
+import 'core/fonts/font_app_builder.dart';
 import 'l10n/generated/app_localizations.dart';
 import 'providers/app_controller.dart';
 import 'ui/screens/home_screen.dart';
@@ -24,6 +25,11 @@ class MonopolyApp extends ConsumerWidget {
       title: 'bHiVE Monopoly',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark(languageCode: language),
+      // Keep the saved choice effective on every route and dialog.
+      builder: (context, child) => FontAppBuilder(
+        languageCode: language,
+        child: child ?? const SizedBox.shrink(),
+      ),
       locale: Locale(language),
       supportedLocales: AppLocalizations.supportedLocales,
       localizationsDelegates: AppLocalizations.localizationsDelegates,

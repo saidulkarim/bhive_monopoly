@@ -17,8 +17,10 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   intl: any
-  image: ^4.13.1
+  image: 4.5.4
   web_socket_channel: ^3.0.3
+  audioplayers: 6.1.0
+  model_viewer_plus: 1.10.0
 
 dev_dependencies:
   flutter_test:
@@ -32,6 +34,8 @@ flutter:
   generate: true
 
   assets:
+    - assets/audio/
+    - assets/models/
     - assets/icons/app_icon.png
 
   fonts:

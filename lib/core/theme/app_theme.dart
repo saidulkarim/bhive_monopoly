@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../fonts/font_catalog.dart';
+
 class AppTheme {
   AppTheme._();
 
@@ -10,10 +12,11 @@ class AppTheme {
 
   static ThemeData dark({String languageCode = 'en'}) => ThemeData(
     useMaterial3: true,
-    fontFamily: languageCode == 'bn' ? 'Karnaphuli' : 'Exo2',
-    fontFamilyFallback: languageCode == 'bn'
-        ? const ['Karnaphuli', 'Exo2']
-        : const ['Karnaphuli', 'Nikosh', 'NikoshBAN'],
+    fontFamily: FontCatalog.defaultFor(languageCode),
+    fontFamilyFallback: FontCatalog.fallbacks(
+      languageCode,
+      FontCatalog.defaultFor(languageCode),
+    ),
     brightness: Brightness.dark,
     scaffoldBackgroundColor: obsidian,
     colorScheme: ColorScheme.fromSeed(

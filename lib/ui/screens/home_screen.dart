@@ -11,6 +11,10 @@ import 'font_settings_screen.dart';
 import 'rules_screen.dart';
 import '../../game/ui/game_setup_screen.dart';
 import '../../game/ui/game_typography.dart';
+import '../../game/ui/experience_settings_screen.dart';
+import '../../game/ui/three_d_showroom_screen.dart';
+import '../../game/ui/token_settings_screen.dart';
+import '../../game/ui/match_history_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -125,6 +129,78 @@ class HomeScreen extends ConsumerWidget {
                                 onPressed: () => Navigator.of(context).push(
                                   MaterialPageRoute<void>(
                                     builder: (_) => FontSettingsScreen(
+                                      languageCode: state.languageCode,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              ActionChip(
+                                avatar: const Icon(
+                                  Icons.view_in_ar_rounded,
+                                  size: 20,
+                                ),
+                                label: Text(
+                                  state.languageCode == 'bn'
+                                      ? '৩ডি মডেল'
+                                      : '3D Showroom',
+                                ),
+                                onPressed: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => ThreeDShowroomScreen(
+                                      languageCode: state.languageCode,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              ActionChip(
+                                avatar: const Icon(
+                                  Icons.directions_car_rounded,
+                                  size: 20,
+                                ),
+                                label: Text(
+                                  state.languageCode == 'bn'
+                                      ? 'টোকেন নির্বাচন'
+                                      : 'Player Tokens',
+                                ),
+                                onPressed: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => TokenSettingsScreen(
+                                      languageCode: state.languageCode,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              ActionChip(
+                                avatar: const Icon(
+                                  Icons.leaderboard_rounded,
+                                  size: 20,
+                                ),
+                                label: Text(
+                                  state.languageCode == 'bn'
+                                      ? 'খেলার ইতিহাস'
+                                      : 'Match History',
+                                ),
+                                onPressed: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => MatchHistoryScreen(
+                                      languageCode: state.languageCode,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              ActionChip(
+                                avatar: const Icon(
+                                  Icons.graphic_eq_rounded,
+                                  size: 20,
+                                ),
+                                label: Text(
+                                  state.languageCode == 'bn'
+                                      ? 'গেম অভিজ্ঞতা'
+                                      : 'Game Experience',
+                                ),
+                                onPressed: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => ExperienceSettingsScreen(
                                       languageCode: state.languageCode,
                                     ),
                                   ),

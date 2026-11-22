@@ -183,8 +183,8 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
                   code: 'bn',
                   title: _text('Bangla / বাংলা', 'বাংলা ফন্ট'),
                   subtitle: _text(
-                    'Default: Hadi · fallback: Nikosh',
-                    'ডিফল্ট: Hadi · বিকল্প: Nikosh',
+                    'Default: Karnaphuli · fallback: Nikosh',
+                    'ডিফল্ট: Karnaphuli · বিকল্প: Nikosh',
                   ),
                   selected: _bangla,
                   controller: _bnPreview,
@@ -501,7 +501,7 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
       OutlinedButton.icon(
         onPressed: _saving ? null : _resetSelection,
         icon: const Icon(Icons.restart_alt_rounded),
-        label: Text(_text('Restore Hadi / Exo2', 'Hadi / Exo2 ফিরিয়ে আনুন')),
+        label: Text(_text('Restore Karnaphuli / Exo2', 'Karnaphuli / Exo2 ফিরিয়ে আনুন')),
       ),
     ],
   );

@@ -1,10 +1,8 @@
-// ignore_for_file: avoid_relative_lib_imports
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../lib/game/ui/game_text.dart';
-import '../../lib/game/ui/game_typography.dart';
+import 'package:monopoly/game/ui/game_text.dart';
+import 'package:monopoly/game/ui/game_typography.dart';
 
 void main() {
   test('Bangla font, fallback, numerals, and all board labels', () {
@@ -24,23 +22,18 @@ void main() {
     expect(bn.spaceName(100, 'Unknown'), 'Unknown');
   });
 
-  testWidgets('Material theme switches fonts when language changes', (
-    tester,
-  ) async {
+  testWidgets('Material theme switches fonts when language changes', (tester) async {
     Future<void> pumpLanguage(String code) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: GameTypography(
-            languageCode: code,
-            child: const Scaffold(body: Text('Sample')),
-          ),
-        ),
-      );
+      await tester.pumpWidget(MaterialApp(home: GameTypography(
+        languageCode: code,
+        child: const Scaffold(body: Text('Sample')),
+      )));
     }
 
     await pumpLanguage('bn');
     var ctx = tester.element(find.text('Sample'));
     expect(Theme.of(ctx).textTheme.bodyMedium!.fontFamily, 'Karnaphuli');
+    expect(Theme.of(ctx).textTheme.bodyMedium!.fontFamilyFallback, ['Nikosh']);
 
     await pumpLanguage('en');
     ctx = tester.element(find.text('Sample'));

@@ -4,9 +4,14 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../engine/game_engine.dart';
+import '../../experience/board_camera_preset.dart';
+import '../../experience/game_experience_settings.dart';
+import '../../experience/token_preferences.dart';
 import '../../models/game_models.dart';
 import '../game_text.dart';
-import 'dice_face.dart';
+import 'animated_board_tokens.dart';
+import 'board_center_action.dart';
+import 'ownership_corner_badge.dart';
 
 const Color kBoardGold = Color(0xFFE9BE67);
 const Color kBoardDark = Color(0xFF0B1718);
@@ -53,190 +58,205 @@ class GameBoardView extends StatelessWidget {
     required this.text,
     required this.onSelect,
     this.perspective = true,
+    this.cameraOverride,
+    this.transformationController,
     this.visiblePositions = const <int, int>{},
     this.dicePreview,
     this.diceRolling = false,
+    this.onRoll,
+    this.onEndTurn,
+    this.canAct = false,
+    this.actionEnabled,
+    this.onReviewDecision,
+    this.decisionEnabled,
+    this.onViewActivity,
   });
 
   final GameEngine engine;
   final GameText text;
   final void Function(int tileIndex) onSelect;
   final bool perspective;
+
+  /// Per-screen override. Does not persist or change the global camera setting.
+  final BoardCameraPreset? cameraOverride;
+
+  /// Allows the full-screen board to provide working zoom/reset controls.
+  final TransformationController? transformationController;
   final Map<int, int> visiblePositions;
   final DiceRoll? dicePreview;
   final bool diceRolling;
+  final VoidCallback? onRoll;
+  final VoidCallback? onEndTurn;
+  final bool canAct;
+  final bool Function()? actionEnabled;
+  final VoidCallback? onReviewDecision;
+  final bool Function()? decisionEnabled;
+  final VoidCallback? onViewActivity;
 
   static const double tile = 1000 / 11;
 
-  static (int, int) gridPosition(int index) {
-    if (index <= 10) return (10, 10 - index);
-    if (index <= 20) return (20 - index, 0);
-    if (index <= 30) return (0, index - 20);
-    return (index - 30, 10);
-  }
+  static (int, int) gridPosition(int index) =>
+      BoardTokenGeometry.gridPosition(index);
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final side = math.min(constraints.maxWidth, constraints.maxHeight);
-        return Center(
-          child: SizedBox(
-            width: side,
-            height: side,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(18),
-              child: InteractiveViewer(
-                minScale: 1,
-                maxScale: 3.5,
-                boundaryMargin: const EdgeInsets.all(100),
-                child: FittedBox(
-                  fit: BoxFit.contain,
-                  child: Transform(
-                    alignment: Alignment.center,
-                    transform: Matrix4.identity()
-                      ..setEntry(3, 2, 0.0006)
-                      ..rotateX(perspective ? -0.20 : 0),
-                    child: SizedBox(
-                      height: 1000,
-                      width: 1000,
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                gradient: const RadialGradient(
-                                  colors: [
-                                    Color(0xFF1F6559),
-                                    Color(0xFF0C2528),
-                                  ],
-                                ),
-                                border: Border.all(color: kBoardGold, width: 6),
-                              ),
-                            ),
+    return AnimatedBuilder(
+      animation: Listenable.merge(<Listenable>[
+        GameExperienceSettings.instance,
+        TokenPreferences.instance,
+      ]),
+      builder: (context, _) => LayoutBuilder(
+        builder: (context, constraints) {
+          final settings = GameExperienceSettings.instance;
+          final camera = perspective
+              ? (cameraOverride ?? settings.cameraPreset)
+              : BoardCameraPreset.topDown;
+          final side = math.min(constraints.maxWidth, constraints.maxHeight);
+          return Center(
+            child: SizedBox(
+              width: side,
+              height: side,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: InteractiveViewer(
+                  transformationController: transformationController,
+                  minScale: 1,
+                  maxScale: 4.5,
+                  boundaryMargin: const EdgeInsets.all(180),
+                  child: FittedBox(
+                    fit: BoxFit.contain,
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween<double>(end: camera.tilt),
+                      duration: settings.reducedMotion
+                          ? Duration.zero
+                          : const Duration(milliseconds: 360),
+                      curve: Curves.easeInOutCubic,
+                      builder: (context, angle, child) => Transform(
+                        alignment: Alignment.center,
+                        transform: Matrix4.identity()
+                          ..setEntry(3, 2, camera.depth)
+                          ..rotateX(angle)
+                          ..rotateZ(camera.spin)
+                          // An angled board otherwise extends outside its
+                          // square viewport and hides the first/last row.
+                          ..scale(
+                            camera == BoardCameraPreset.topDown ? 1.0 : .79,
                           ),
-                          Positioned(
-                            left: tile,
-                            right: tile,
-                            top: tile,
-                            bottom: tile,
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: kBoardGold.withOpacity(.65),
-                                  width: 4,
-                                ),
-                                gradient: const RadialGradient(
-                                  colors: [
-                                    Color(0xFF1D524A),
-                                    Color(0xFF102D2C),
-                                  ],
-                                ),
-                              ),
-                              child: Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(
-                                      Icons.diamond_rounded,
-                                      color: kBoardGold,
-                                      size: 95,
-                                    ),
-                                    const Text(
-                                      'bHiVE',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        fontFamily: 'Exo2',
-                                        fontSize: 78,
-                                        fontWeight: FontWeight.w800,
-                                        color: kBoardGold,
-                                        letterSpacing: 5,
-                                      ),
-                                    ),
-                                    const Text(
-                                      'MONOPOLY',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        fontFamily: 'Exo2',
-                                        fontSize: 30,
-                                        letterSpacing: 9,
-                                        color: Colors.white70,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 60),
-                                    Text(
-                                      text.choose(
-                                        'PROPERTY EMPIRE',
-                                        'সম্পত্তির সাম্রাজ্য',
-                                      ),
-                                      style: TextStyle(
-                                        fontFamily: text.font,
-                                        fontSize: 22,
-                                        color: Colors.white70,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 25),
-                                    if ((dicePreview ?? engine.lastRoll) !=
-                                        null)
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          DiceFace(
-                                            value:
-                                                (dicePreview ??
-                                                        engine.lastRoll)!
-                                                    .first,
-                                            angle: diceRolling ? -.12 : 0,
-                                          ),
-                                          const SizedBox(width: 18),
-                                          DiceFace(
-                                            value:
-                                                (dicePreview ??
-                                                        engine.lastRoll)!
-                                                    .second,
-                                            angle: diceRolling ? .16 : 0,
-                                          ),
-                                        ],
-                                      ),
-                                    const SizedBox(height: 25),
-                                    Text(
-                                      '${text.choose('TURN', 'চাল')} ${text.integer(engine.turnNumber)}',
-                                      style: TextStyle(
-                                        fontFamily: text.font,
-                                        fontSize: 22,
-                                        color: kBoardGold,
-                                      ),
-                                    ),
-                                  ],
+                        child: child,
+                      ),
+                      child: SizedBox(
+                        height: 1000,
+                        width: 1000,
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: const RadialGradient(
+                                    colors: [
+                                      Color(0xFF1F6559),
+                                      Color(0xFF0C2528),
+                                    ],
+                                  ),
+                                  border: Border.all(
+                                    color: kBoardGold,
+                                    width: 6,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                          for (final tileData in engine.spaces)
-                            _positionTile(tileData),
-                        ],
+                            Positioned(
+                              left: tile,
+                              right: tile,
+                              top: tile,
+                              bottom: tile,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: kBoardGold.withOpacity(.65),
+                                    width: 4,
+                                  ),
+                                  gradient: const RadialGradient(
+                                    colors: [
+                                      Color(0xFF1D524A),
+                                      Color(0xFF102D2C),
+                                    ],
+                                  ),
+                                ),
+                                child: Center(
+                                  child: BoardCenterAction(
+                                    engine: engine,
+                                    text: text,
+                                    dicePreview: dicePreview,
+                                    diceRolling: diceRolling,
+                                    canAct: actionEnabled?.call() ?? canAct,
+                                    onRoll: onRoll,
+                                    onEndTurn: onEndTurn,
+                                    onReviewDecision: onReviewDecision,
+                                    canReviewDecision:
+                                        decisionEnabled?.call() ?? false,
+                                    onViewActivity: onViewActivity,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            for (final tileData in engine.spaces)
+                              _positionTile(tileData),
+                            // Painted on the inward-facing edge of each
+                            // owned property, not over the price/name.
+                            for (final tileData in engine.spaces)
+                              if (engine.properties[tileData.index].ownerId !=
+                                  null)
+                                _positionOwnerFlag(tileData),
+                            Positioned.fill(
+                              child: AnimatedBoardTokens(
+                                game: engine,
+                                visiblePositions: visiblePositions,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _positionOwnerFlag(BoardSpace data) {
+    final ownerId = engine.properties[data.index].ownerId;
+    final placement = OwnerFlagGeometry.forTile(data.index);
+    if (ownerId == null ||
+        ownerId < 0 ||
+        ownerId >= engine.players.length ||
+        placement == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned(
+      left: placement.left,
+      top: placement.top,
+      width: placement.width,
+      height: placement.height,
+      child: IgnorePointer(
+        child: OwnershipCornerBadge(
+          key: ValueKey<String>('owner-flag-${data.index}'),
+          ownerId: ownerId,
+          ownerName: engine.players[ownerId].name,
+          direction: placement.direction,
+        ),
+      ),
     );
   }
 
   Widget _positionTile(BoardSpace data) {
     final (row, col) = gridPosition(data.index);
     final state = engine.properties[data.index];
-    final occupants = engine.players
-        .where(
-          (p) =>
-              !p.bankrupt &&
-              (visiblePositions[p.id] ?? p.position) == data.index,
-        )
-        .toList();
     final group = data.group;
     return Positioned(
       top: row * tile,
@@ -261,80 +281,76 @@ class GameBoardView extends StatelessWidget {
                 width: 1.5,
               ),
             ),
-            child: Column(
+            child: Stack(
               children: [
-                if (group != null)
-                  Container(height: 17, color: groupColor(group)),
-                if (state.ownerId != null)
-                  Container(height: 5, color: tokenColors[state.ownerId!]),
-                const SizedBox(height: 5),
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      text.spaceName(data.index, data.name),
-                      textAlign: TextAlign.center,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
+                Column(
+                  children: [
+                    if (group != null)
+                      Container(height: 17, color: groupColor(group)),
+                    if (state.ownerId != null)
+                      Container(height: 5, color: tokenColors[state.ownerId!]),
+                    const SizedBox(height: 2),
+                    Text(
+                      text.integer(data.index),
                       style: TextStyle(
                         fontFamily: text.font,
                         fontFamilyFallback: text.fallbackFonts,
-                        color: Colors.white,
-                        height: text.bn ? 1.23 : 1.1,
-                        fontWeight: FontWeight.w700,
-                        fontSize:
-                            data.kind == SpaceKind.go ||
-                                data.kind == SpaceKind.jail ||
-                                data.kind == SpaceKind.goToJail ||
-                                data.kind == SpaceKind.freeParking
-                            ? (text.bn ? 12.2 : 13)
-                            : (text.bn ? 11.5 : 11),
+                        fontSize: 23,
+                        height: 1.0,
+                        color: kBoardGold,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                  ),
-                ),
-                if (data.price > 0)
-                  Text(
-                    text.money(data.price),
-                    style: TextStyle(
-                      color: kBoardGold,
-                      fontSize: 11,
-                      fontFamily: text.font,
-                      fontFamilyFallback: text.fallbackFonts,
-                    ),
-                  ),
-                if (state.development > 0)
-                  BuildingPieces(development: state.development),
-                if (state.mortgaged)
-                  const Icon(
-                    Icons.lock_outline,
-                    size: 12,
-                    color: Colors.redAccent,
-                  ),
-                if (occupants.isNotEmpty)
-                  SizedBox(
-                    height: 23,
-                    child: Center(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            for (final player in occupants)
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 1,
-                                ),
-                                child: BoardToken(
-                                  color: tokenColors[player.id],
-                                  playerId: player.id,
-                                  isActive: player.id == engine.currentPlayerId,
-                                  size: 22,
-                                ),
-                              ),
-                          ],
+                    Expanded(
+                      child: Center(
+                        child: Text(
+                          text.spaceName(data.index, data.name),
+                          textAlign: TextAlign.center,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontFamily: text.font,
+                            fontFamilyFallback: text.fallbackFonts,
+                            color: Colors.white,
+                            height: text.bn ? 1.23 : 1.1,
+                            fontWeight: FontWeight.w700,
+                            fontSize:
+                                data.kind == SpaceKind.go ||
+                                    data.kind == SpaceKind.jail ||
+                                    data.kind == SpaceKind.goToJail ||
+                                    data.kind == SpaceKind.freeParking
+                                ? (text.bn ? 15 : 15.5)
+                                : (text.bn ? 14.0 : 14.0),
+                          ),
                         ),
                       ),
                     ),
+                    if (data.price > 0)
+                      Text(
+                        text.money(data.price),
+                        style: TextStyle(
+                          color: kBoardGold,
+                          fontSize: 13,
+                          fontFamily: text.font,
+                          fontFamilyFallback: text.fallbackFonts,
+                        ),
+                      ),
+                    if (state.mortgaged)
+                      const Icon(
+                        Icons.lock_outline,
+                        size: 12,
+                        color: Colors.redAccent,
+                      ),
+                  ],
+                ),
+                // Keep houses/hotels OUTSIDE the tile's vertical Column.
+                // Otherwise adding a building increases its minimum height
+                // and the 90.9-px board cells overflow in Flutter's renderer.
+                if (state.development > 0)
+                  Positioned(
+                    top: group != null ? 1 : 2,
+                    right: 1,
+                    child: _developmentBadge(state.development),
                   ),
               ],
             ),
@@ -343,4 +359,44 @@ class GameBoardView extends StatelessWidget {
       ),
     );
   }
+
+  /// Compact building badge overlays the color strip instead of taking
+  /// vertical space from the title, name and price. Supports 1–4 houses
+  /// and a hotel at level 5, without adding a RenderFlex child height.
+  Widget _developmentBadge(int level) => Semantics(
+    label: level == 5 ? 'Hotel built' : '$level houses built',
+    child: Container(
+      key: const ValueKey<String>('tile-development-badge'),
+      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+      decoration: BoxDecoration(
+        color: const Color(0xEE102527),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: kBoardGold, width: .8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            level == 5 ? Icons.apartment_rounded : Icons.home_rounded,
+            size: 10,
+            color: level == 5
+                ? const Color(0xFFEF736B)
+                : const Color(0xFF78D594),
+          ),
+          if (level < 5) ...[
+            const SizedBox(width: 1),
+            Text(
+              '$level',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                height: 1.0,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ],
+      ),
+    ),
+  );
 }

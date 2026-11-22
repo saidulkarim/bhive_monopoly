@@ -1,4 +1,5 @@
 import '../../core/fonts/font_preferences.dart';
+import '../../core/utils/money_formatter.dart';
 
 /// Lightweight bilingual labels. No changes required to generated ARB files.
 class GameText {
@@ -17,15 +18,53 @@ class GameText {
     }).join();
   }
 
-  String money(int value) {
-    final negative = value < 0;
-    final numeric = value.abs().toString();
-    final comma = numeric.replaceAllMapped(
-      RegExp(r'\B(?=(\d{3})+(?!\d))'),
-      (m) => ',',
-    );
-    return '${negative ? '−' : ''}${bn ? '৳' : r'$'}${digits(comma)}';
+  /// The game's single currency formatter, shared with the home screen.
+  /// English: $1,500; Bangla: ৳১,৫০০ (lakh/crore grouping for large amounts).
+  String money(int value) =>
+      MoneyFormatter.format(value, languageCode: languageCode);
+
+  /// Localize amounts in existing GameEngine activity/error strings.
+  ///
+  /// Engine logs are stored and sent over LAN as plain, stable text. We only
+  /// decorate known money amounts for display. Dice values, player numbers,
+  /// turns, tile numbers, and card movement distances are left unchanged.
+  /// This also formats messages from older saved games and remote LAN hosts.
+  String moneyInEvent(String raw) {
+    var result = raw;
+    for (final rule in _moneyEventRules) {
+      result = result.replaceAllMapped(rule, (match) {
+        final prefix = match.group(1)!;
+        final amount = int.tryParse(match.group(2)!);
+        return amount == null ? match.group(0)! : '$prefix${money(amount)}';
+      });
+    }
+    return result;
   }
+
+  /// Only match amounts in known monetary phrases. Never match bare numbers.
+  static final List<RegExp> _moneyEventRules = <RegExp>[
+    // Rent, salary, card payments, bids, fines and dividends.
+    RegExp(
+      r'(\b(?:earned|collected|paid|bids|pays|pay|collect|receive|receives)\s+)([0-9]+)\b',
+      caseSensitive: false,
+    ),
+    // Purchases, auctions, house builds, sales, mortgages and unmortgages.
+    RegExp(r'(\b(?:for|at)\s+)([0-9]+)(?=[.!?]?\s*$)', caseSensitive: false),
+    // Tax and validation error messages from older game states.
+    RegExp(
+      r'(\b(?:tax paid|minimum bid|balance|amount|price|rent|fine|cost|bid)\s*:\s*)([0-9]+)\b',
+      caseSensitive: false,
+    ),
+    // Special card text: "Pay each other player 50".
+    RegExp(r'(\beach other player\s+)([0-9]+)\b', caseSensitive: false),
+    // Repairs card: "pay 25 per house and 100 per hotel".
+    RegExp(
+      r'(\band\s+)([0-9]+)(?=\s+per\s+(?:house|hotel)\b)',
+      caseSensitive: false,
+    ),
+    // Delivery fee and similar card effects.
+    RegExp(r'(\bfee of\s+)([0-9]+)\b', caseSensitive: false),
+  ];
 
   String integer(int value) => digits(value.toString());
   String get font => FontPreferences.instance.familyFor(languageCode);

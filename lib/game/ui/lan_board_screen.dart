@@ -1,14 +1,32 @@
+// ignore_for_file: invalid_use_of_visible_for_testing_member, invalid_use_of_protected_member
+
 import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
 
 import '../engine/game_engine.dart';
+import '../experience/game_audio.dart';
+import '../experience/game_experience_settings.dart';
+import '../experience/token_preferences.dart';
+import '../experience/board_camera_preset.dart';
 import '../models/game_models.dart';
 import '../network/lan_room_controller.dart';
 import 'game_text.dart';
+import 'experience_settings_screen.dart';
+import 'token_settings_screen.dart';
+import 'widgets/victory_confetti.dart';
 import 'widgets/lan_avatar_badge.dart';
 import 'widgets/game_board_view.dart';
+import 'widgets/adaptive_board_panel.dart';
+import 'widgets/compact_players_strip.dart';
+import 'widgets/property_deed_card.dart';
+import 'widgets/animated_deed_entrance.dart';
+import 'widgets/victory_standings_sheet.dart';
+import '../network/lan_reconnect_policy.dart';
+import 'widgets/game_activity_sheet.dart';
+import '../persistence/match_history_store.dart';
+import 'match_history_screen.dart';
 
 /// LAN game board. Uses Phase-3 board renderer but NEVER invokes GameEngine
 /// from a client. Buttons send actions to the Android/desktop host only.
@@ -33,10 +51,257 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
   final Random _animationRandom = Random();
   DiceRoll? _dicePreview;
   bool _diceRolling = false;
-  bool _perspective = true;
   int _lastSequence = 0;
   int _animationEpoch = 0;
   int _seenError = 0;
+  Future<void>? _completedHistoryWrite;
+  bool _historyQueued = false;
+  final ChangeNotifier _boardUpdates = ChangeNotifier();
+  bool _boardActionPending = false;
+  Timer? _boardActionCooldown;
+  bool _decisionOpen = false;
+  String? _autoDecisionKey;
+  BuildContext? _decisionContext;
+
+  bool get _needsDecision {
+    final phase = game?.phase;
+    return phase == TurnPhase.purchase ||
+        phase == TurnPhase.auction ||
+        phase == TurnPhase.jailDecision ||
+        phase == TurnPhase.debt;
+  }
+
+  bool get _canMakeDecision =>
+      room.connected &&
+      !room.paused &&
+      room.pendingTrade == null &&
+      (game?.phase == TurnPhase.auction ? room.isMyAuctionBid : room.isMyTurn);
+
+  String get _decisionKey =>
+      '${game?.turnNumber ?? 0}-${game?.phase}-'
+      '${game?.auction?.bidderId ?? -1}-'
+      '${game?.auction?.spaceIndex ?? -1}-'
+      '${game?.auction?.highBid ?? 0}-${game?.auction?.minimumBid ?? 0}';
+
+  void _scheduleDecisionPrompt() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // The bid/decision panel opens on portrait, landscape and fullscreen,
+      // only on the device of the player authorized to act.
+      if (!mounted || !_needsDecision || !_canMakeDecision || _decisionOpen) {
+        return;
+      }
+      if (_decisionKey != _autoDecisionKey) _openDecisionSheet();
+    });
+  }
+
+  void _closeDecisionIfFinished() {
+    if (!_decisionOpen || (_needsDecision && _canMakeDecision)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _decisionContext;
+      if (ctx != null && ctx.mounted && ModalRoute.of(ctx)?.isCurrent == true) {
+        Navigator.of(ctx).pop();
+      }
+    });
+  }
+
+  void _openDecisionSheet() {
+    if (_decisionOpen || !_needsDecision || !_canMakeDecision) return;
+    _decisionOpen = true;
+    _autoDecisionKey = _decisionKey;
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      useSafeArea: true,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF172A2C),
+      barrierColor: const Color(0x99000000),
+      constraints: const BoxConstraints(maxWidth: 560),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetCtx) {
+        _decisionContext = sheetCtx;
+        return AnimatedBuilder(
+          animation: room,
+          builder: (ctx, child) => AnimatedPadding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(ctx).bottom,
+            ),
+            duration: const Duration(milliseconds: 190),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(ctx).height * .76,
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(14, 8, 14, 22),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+                      child: Text(
+                        t.choose('Action required', 'আপনার সিদ্ধান্ত প্রয়োজন'),
+                        style: TextStyle(
+                          fontFamily: t.font,
+                          fontFamilyFallback: t.fallbackFonts,
+                          color: kBoardGold,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    _controls(),
+                    const SizedBox(height: 6),
+                    TextButton(
+                      onPressed: () => Navigator.of(sheetCtx).pop(),
+                      child: Text(
+                        t.choose('VIEW BOARD', 'বোর্ড দেখুন'),
+                        style: TextStyle(
+                          fontFamily: t.font,
+                          fontFamilyFallback: t.fallbackFonts,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    ).whenComplete(() {
+      _decisionOpen = false;
+      _decisionContext = null;
+    });
+  }
+
+  Widget _decisionNotice() => Material(
+    key: const ValueKey<String>('lan-decision-notice'),
+    color: const Color(0xFF234038),
+    borderRadius: BorderRadius.circular(12),
+    child: InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: _canMakeDecision ? _openDecisionSheet : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        child: Row(
+          children: <Widget>[
+            const Icon(Icons.notifications_active_outlined, color: kBoardGold),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _canMakeDecision
+                    ? t.choose(
+                        'Decision needed · Tap to open',
+                        'সিদ্ধান্ত প্রয়োজন · খুলতে চাপুন',
+                      )
+                    : t.choose(
+                        'Waiting for another player',
+                        'অন্য খেলোয়াড়ের জন্য অপেক্ষা',
+                      ),
+                style: TextStyle(
+                  fontFamily: t.font,
+                  fontFamilyFallback: t.fallbackFonts,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            if (_canMakeDecision)
+              const Icon(Icons.keyboard_arrow_up, color: kBoardGold),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Timer? _autoReconnectTimer;
+  int _reconnectAttempts = 0;
+
+  void _planAutoReconnect() {
+    // Rejoin only a previously joined, already-started room. A failed
+    // initial PIN/handshake must not become an infinite connection loop.
+    if (!mounted ||
+        room.isHost ||
+        room.playerId == null ||
+        !room.started ||
+        room.connected ||
+        room.reconnecting ||
+        _autoReconnectTimer != null) {
+      return;
+    }
+    final delay = LanReconnectPolicy.delayFor(_reconnectAttempts);
+    if (delay == null) return;
+    _reconnectAttempts++;
+    _autoReconnectTimer = Timer(delay, () {
+      _autoReconnectTimer = null;
+      if (!mounted || room.connected || room.reconnecting) return;
+      unawaited(_tryReconnect());
+    });
+  }
+
+  Future<void> _tryReconnect() async {
+    _autoReconnectTimer?.cancel();
+    _autoReconnectTimer = null;
+    if (!mounted || room.connected || room.reconnecting) return;
+    try {
+      await room.reconnect();
+    } catch (_) {
+      // LanRoomController already reports the connection error to the UI.
+      // Its change notification schedules the next capped retry.
+      if (mounted) _planAutoReconnect();
+    }
+  }
+
+  void _checkConnectivity() {
+    if (room.connected) {
+      _autoReconnectTimer?.cancel();
+      _autoReconnectTimer = null;
+      _reconnectAttempts = 0;
+    } else {
+      _planAutoReconnect();
+    }
+  }
+
+  void _saveLanResultIfFinished(GameEngine? engine) {
+    if (_historyQueued ||
+        engine == null ||
+        engine.phase != TurnPhase.gameOver ||
+        engine.winnerId == null) {
+      return;
+    }
+    _historyQueued = true;
+    final record = MatchRecord.fromFinishedLanGame(engine, roomPin: room.pin);
+    _completedHistoryWrite = MatchHistoryStore.record(record).then((_) {});
+    unawaited(
+      _completedHistoryWrite!.catchError((Object error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                t.choose(
+                  'LAN result could not be saved.',
+                  'LAN খেলার ফল সংরক্ষণ করা যায়নি।',
+                ),
+              ),
+            ),
+          );
+        }
+      }),
+    );
+  }
+
+  Future<void> _openHistory() async {
+    try {
+      await _completedHistoryWrite;
+    } catch (_) {}
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => MatchHistoryScreen(languageCode: widget.languageCode),
+      ),
+    );
+  }
 
   LanRoomController get room => widget.room;
   GameEngine? get game => room.game;
@@ -44,6 +309,8 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(GameExperienceSettings.instance.ensureLoaded());
+    unawaited(TokenPreferences.instance.ensureLoaded());
     _lastSequence = room.lastEvent?.sequence ?? 0;
     _seenError = room.errorRevision;
     final engine = game;
@@ -53,36 +320,47 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
       }
     }
     room.addListener(_update);
+    _checkConnectivity();
+    _saveLanResultIfFinished(engine);
+    _scheduleDecisionPrompt();
   }
 
   @override
   void dispose() {
     room.removeListener(_update);
+    _autoReconnectTimer?.cancel();
+    _boardActionCooldown?.cancel();
     ++_animationEpoch;
     _bid.dispose();
+    _boardUpdates.dispose();
     unawaited(room.shutdown());
     super.dispose();
   }
 
   void _update() {
     if (!mounted) return;
+    _checkConnectivity();
     if (room.errorRevision != _seenError) {
       _seenError = room.errorRevision;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || room.lastError == null) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(room.lastError!),
+            content: Text(t.moneyInEvent(room.lastError!)),
             backgroundColor: const Color(0xFF9C423C),
           ),
         );
       });
     }
     final engine = game;
+    _saveLanResultIfFinished(engine);
     if (engine != null) {
       final event = room.lastEvent;
       if (event != null && event.sequence > _lastSequence) {
         _lastSequence = event.sequence;
+        _boardActionPending = false;
+        _boardActionCooldown?.cancel();
+        _playEventSound(event, engine);
         final epoch = ++_animationEpoch;
         if (event.dice != null) {
           unawaited(_animate(event, epoch));
@@ -100,11 +378,59 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
       }
     }
     setState(() {});
+    _boardUpdates.notifyListeners();
+    _closeDecisionIfFinished();
+    _scheduleDecisionPrompt();
+  }
+
+  void _playEventSound(LanMoveEvent event, GameEngine engine) {
+    if (engine.phase == TurnPhase.gameOver) {
+      GameAudio.instance.fire(GameSfx.victory);
+      return;
+    }
+    switch (event.action) {
+      case 'roll':
+      case 'jailRoll':
+        GameAudio.instance.fire(GameSfx.dice);
+        break;
+      case 'buy':
+      case 'acceptTrade':
+        GameAudio.instance.fire(GameSfx.purchase);
+        break;
+      case 'bid':
+      case 'payFine':
+      case 'unmortgage':
+        GameAudio.instance.fire(GameSfx.coin);
+        break;
+      case 'build':
+      case 'sellBuilding':
+        GameAudio.instance.fire(GameSfx.build);
+        break;
+      case 'bankrupt':
+        GameAudio.instance.fire(GameSfx.jail);
+        break;
+      case 'endTurn':
+        GameAudio.instance.fire(GameSfx.turn);
+        break;
+    }
   }
 
   Future<void> _animate(LanMoveEvent event, int epoch) async {
     final roll = event.dice!;
     if (!mounted) return;
+    if (GameExperienceSettings.instance.reducedMotion) {
+      setState(() {
+        _diceRolling = false;
+        _dicePreview = null;
+        final current = game;
+        if (current != null) {
+          for (final player in current.players) {
+            _positions[player.id] = player.position;
+          }
+        }
+      });
+      return;
+    }
     setState(() {
       _dicePreview = roll;
       _diceRolling = true;
@@ -139,6 +465,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
         await Future<void>.delayed(const Duration(milliseconds: 72));
         if (!mounted || epoch != _animationEpoch) return;
         setState(() => _positions[event.actorId] = (from + step) % 40);
+        _boardUpdates.notifyListeners();
       }
     }
     if (!mounted || epoch != _animationEpoch) return;
@@ -151,6 +478,42 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
       }
       _dicePreview = null;
     });
+    _boardUpdates.notifyListeners();
+  }
+
+  bool get _canUseBoardActions =>
+      room.connected &&
+      !room.paused &&
+      room.pendingTrade == null &&
+      room.isMyTurn &&
+      !_boardActionPending;
+
+  void _sendBoardActionOnce(String action) {
+    if (!_canUseBoardActions) return;
+    setState(() => _boardActionPending = true);
+    _boardUpdates.notifyListeners();
+    _send(action);
+    _boardActionCooldown?.cancel();
+    _boardActionCooldown = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      setState(() => _boardActionPending = false);
+      _boardUpdates.notifyListeners();
+    });
+  }
+
+  void _handleBoardDice() {
+    if (!_canUseBoardActions) return;
+    if (game?.phase == TurnPhase.roll) {
+      _sendBoardActionOnce('roll');
+    } else if (game?.phase == TurnPhase.jailDecision) {
+      _sendBoardActionOnce('jailRoll');
+    }
+  }
+
+  void _handleBoardEndTurn() {
+    if (_canUseBoardActions && game?.phase == TurnPhase.complete) {
+      _sendBoardActionOnce('endTurn');
+    }
   }
 
   void _send(String action, {int? index, int? amount}) {
@@ -170,102 +533,227 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
           style: TextStyle(fontFamily: 'Exo2', fontWeight: FontWeight.w800),
         ),
         actions: [
-          IconButton(
-            tooltip: t.choose('3D / top-down', '৩ডি / সমতল'),
-            onPressed: () => setState(() => _perspective = !_perspective),
-            icon: const Icon(Icons.layers_rounded),
+          PopupMenuButton<BoardCameraPreset>(
+            tooltip: t.choose('Camera view', 'ক্যামেরা দৃশ্য'),
+            icon: const Icon(Icons.view_in_ar_rounded),
+            initialValue: GameExperienceSettings.instance.cameraPreset,
+            onSelected: (preset) => unawaited(
+              GameExperienceSettings.instance.setCameraPreset(preset),
+            ),
+            itemBuilder: (context) => [
+              for (final preset in BoardCameraPreset.values)
+                PopupMenuItem<BoardCameraPreset>(
+                  value: preset,
+                  child: Text(
+                    preset.label(t.bn),
+                    style: TextStyle(
+                      fontFamily: t.font,
+                      fontFamilyFallback: t.fallbackFonts,
+                    ),
+                  ),
+                ),
+            ],
           ),
-          IconButton(
-            tooltip: t.choose('Bank inventory', 'ব্যাংক মজুত'),
-            onPressed: engine == null ? null : _bankDialog,
-            icon: const Icon(Icons.account_balance_outlined),
+          PopupMenuButton<String>(
+            tooltip: t.choose('More options', 'আরও অপশন'),
+            icon: const Icon(Icons.more_vert_rounded),
+            onSelected: (action) {
+              switch (action) {
+                case 'tokens':
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => TokenSettingsScreen(
+                        languageCode: widget.languageCode,
+                      ),
+                    ),
+                  );
+                  break;
+                case 'sound':
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ExperienceSettingsScreen(
+                        languageCode: widget.languageCode,
+                      ),
+                    ),
+                  );
+                  break;
+                case 'history':
+                  unawaited(_openHistory());
+                  break;
+                case 'activity':
+                  if (engine != null) {
+                    GameActivitySheet.show(
+                      context,
+                      text: t,
+                      events: List<String>.of(engine.log),
+                    );
+                  }
+                  break;
+                case 'bank':
+                  if (engine != null) _bankDialog();
+                  break;
+              }
+            },
+            itemBuilder: (_) => <PopupMenuEntry<String>>[
+              PopupMenuItem(
+                value: 'history',
+                child: Text(t.choose('Match history', 'খেলার ইতিহাস')),
+              ),
+              PopupMenuItem(
+                value: 'activity',
+                enabled: engine != null,
+                child: Text(t.choose('Match activity', 'খেলার কার্যক্রম')),
+              ),
+              PopupMenuItem(
+                value: 'tokens',
+                child: Text(t.choose('Player tokens', 'খেলোয়াড়ের টোকেন')),
+              ),
+              PopupMenuItem(
+                value: 'sound',
+                child: Text(t.choose('Game experience', 'গেম অভিজ্ঞতা')),
+              ),
+              PopupMenuItem(
+                value: 'bank',
+                enabled: engine != null,
+                child: Text(t.choose('Bank inventory', 'ব্যাংক মজুত')),
+              ),
+            ],
           ),
         ],
       ),
-      body: SafeArea(
-        child: engine == null
-            ? Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const CircularProgressIndicator(color: kBoardGold),
-                    const SizedBox(height: 12),
-                    Text(
-                      t.choose(
-                        'Syncing the board with host…',
-                        'হোস্টের সাথে বোর্ড সিঙ্ক হচ্ছে…',
-                      ),
-                      style: TextStyle(
-                        fontFamily: t.font,
-                        color: Colors.white70,
-                      ),
-                    ),
-                    if (!room.connected) ...[
-                      const SizedBox(height: 12),
-                      FilledButton(
-                        onPressed: () => unawaited(room.reconnect()),
-                        child: Text(t.choose('Reconnect', 'পুনরায় যুক্ত হন')),
-                      ),
-                    ],
-                  ],
-                ),
-              )
-            : LayoutBuilder(
-                builder: (ctx, size) {
-                  final wide = size.maxWidth >= 900;
-                  final board = GameBoardView(
-                    engine: engine,
-                    text: t,
-                    onSelect: _showTile,
-                    perspective: _perspective,
-                    visiblePositions: _positions,
-                    dicePreview: _dicePreview,
-                    diceRolling: _diceRolling,
-                  );
-                  if (wide) {
-                    return Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Row(
-                        children: [
-                          Expanded(child: board),
-                          const SizedBox(width: 16),
-                          SizedBox(
-                            width: 350,
-                            child: ListView(
-                              children: [
-                                _roomBanner(),
-                                const SizedBox(height: 12),
-                                _players(),
-                                const SizedBox(height: 12),
-                                _controls(),
-                                const SizedBox(height: 12),
-                                _events(),
-                              ],
+      // The center of the board is the only roll/end-turn control.
+      bottomNavigationBar: null,
+      body: Stack(
+        children: [
+          SafeArea(
+            child: engine == null
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(color: kBoardGold),
+                        const SizedBox(height: 12),
+                        Text(
+                          t.choose(
+                            'Syncing the board with host…',
+                            'হোস্টের সাথে বোর্ড সিঙ্ক হচ্ছে…',
+                          ),
+                          style: TextStyle(
+                            fontFamily: t.font,
+                            color: Colors.white70,
+                          ),
+                        ),
+                        if (!room.connected) ...[
+                          const SizedBox(height: 12),
+                          FilledButton(
+                            onPressed: () => unawaited(_tryReconnect()),
+                            child: Text(
+                              t.choose('Reconnect', 'পুনরায় যুক্ত হন'),
                             ),
                           ),
                         ],
-                      ),
-                    );
-                  }
-                  return ListView(
-                    padding: const EdgeInsets.all(12),
-                    children: [
-                      _roomBanner(),
-                      const SizedBox(height: 12),
-                      _players(),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        height: min(size.maxWidth - 24, 680.0),
-                        child: board,
-                      ),
-                      const SizedBox(height: 12),
-                      _controls(),
-                      const SizedBox(height: 12),
-                      _events(),
-                    ],
-                  );
-                },
-              ),
+                      ],
+                    ),
+                  )
+                : LayoutBuilder(
+                    builder: (ctx, size) {
+                      final wide = usesWideGameBoardLayout(size.biggest);
+                      final board = AdaptiveBoardPanel(
+                        game: engine,
+                        text: t,
+                        onSelect: _showTile,
+                        visiblePositions: _positions,
+                        dicePreview: _dicePreview,
+                        diceRolling: _diceRolling,
+                        canAct: _canUseBoardActions,
+                        actionEnabled: () => _canUseBoardActions,
+                        onReviewDecision: _openDecisionSheet,
+                        decisionEnabled: () =>
+                            _needsDecision && _canMakeDecision,
+                        onRoll: _handleBoardDice,
+                        onEndTurn: _handleBoardEndTurn,
+                        boardUpdates: _boardUpdates,
+                        gameProvider: () => room.game,
+                        diceValueProvider: () => _dicePreview,
+                        isRollingProvider: () => _diceRolling,
+                        onViewActivity: () => GameActivitySheet.show(
+                          context,
+                          text: t,
+                          events: List<String>.of(room.game?.log ?? engine.log),
+                        ),
+                      );
+                      if (wide) {
+                        return Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Row(
+                            children: [
+                              Expanded(child: board),
+                              const SizedBox(width: 16),
+                              SizedBox(
+                                width: 350,
+                                child: ListView(
+                                  children: [
+                                    _roomBanner(),
+                                    const SizedBox(height: 12),
+                                    _players(),
+                                    const SizedBox(height: 12),
+                                    _controls(),
+                                    const SizedBox(height: 12),
+                                    _events(),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+                      final needsDecision = _needsDecision;
+                      return ListView(
+                        padding: const EdgeInsets.all(12),
+                        children: [
+                          _roomBanner(),
+                          const SizedBox(height: 10),
+                          CompactPlayersStrip(game: engine, text: t),
+                          if (room.pendingTrade != null ||
+                              engine.phase == TurnPhase.gameOver) ...<Widget>[
+                            const SizedBox(height: 10),
+                            _controls(),
+                          ] else if (needsDecision) ...<Widget>[
+                            const SizedBox(height: 10),
+                            _decisionNotice(),
+                          ],
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            height: min(size.maxWidth - 24, 680.0) + 76,
+                            child: board,
+                          ),
+
+                          if (engine.phase == TurnPhase.roll ||
+                              engine.phase == TurnPhase.complete) ...<Widget>[
+                            const SizedBox(height: 8),
+                            _secondary(
+                              t.choose('OFFER TRADE', 'বিনিময়ের প্রস্তাব'),
+                              _canUseBoardActions ? _openTradeDialog : null,
+                            ),
+                            const SizedBox(height: 6),
+                            _secondary(
+                              t.choose(
+                                'MANAGE PROPERTIES',
+                                'সম্পত্তি পরিচালনা',
+                              ),
+                              _canUseBoardActions ? _showMyProperties : null,
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+                          _events(),
+                        ],
+                      );
+                    },
+                  ),
+          ),
+          if (engine?.phase == TurnPhase.gameOver)
+            const Positioned.fill(child: VictoryConfetti()),
+        ],
       ),
     );
   }
@@ -311,11 +799,26 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                 TextButton(
                   onPressed: room.reconnecting
                       ? null
-                      : () => unawaited(room.reconnect()),
+                      : () => unawaited(_tryReconnect()),
                   child: Text(t.choose('Reconnect', 'পুনঃসংযোগ')),
                 ),
             ],
           ),
+          if (!room.isHost && !room.connected && _reconnectAttempts > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '${t.choose('Automatic reconnect', 'স্বয়ংক্রিয় পুনঃসংযোগ')} '
+                '${t.integer(_reconnectAttempts)}/'
+                '${t.integer(LanReconnectPolicy.maxAttempts)}',
+                style: TextStyle(
+                  fontFamily: t.font,
+                  fontFamilyFallback: t.fallbackFonts,
+                  color: Colors.orangeAccent,
+                  fontSize: 12,
+                ),
+              ),
+            ),
           Text(
             room.isHost
                 ? t.choose('You are the host', 'আপনি হোস্ট')
@@ -497,12 +1000,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
               ),
               style: TextStyle(fontFamily: t.font, color: Colors.orangeAccent),
             ),
-          if (engine.phase == TurnPhase.roll)
-            _primary(
-              t.choose('ROLL DICE', 'পাশা নিক্ষেপ'),
-              Icons.casino_rounded,
-              active ? () => _send('roll') : null,
-            ),
+
           if (engine.phase == TurnPhase.purchase) ...[
             Text(
               '${t.spaceName(engine.pendingPurchaseIndex!, engine.spaces[engine.pendingPurchaseIndex!].name)} — '
@@ -556,6 +1054,8 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                     '${t.choose('Bid at least', 'সর্বনিম্ন দর')} '
                     '${t.money(auction.minimumBid)}',
                 labelStyle: const TextStyle(color: Colors.white70),
+                prefixText: t.bn ? '৳' : r'$',
+                prefixStyle: const TextStyle(color: kBoardGold),
               ),
             ),
             const SizedBox(height: 8),
@@ -590,12 +1090,18 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
             ),
           ],
           if (engine.phase == TurnPhase.jailDecision) ...[
-            _primary(
-              t.choose('TRY DOUBLES', 'ডাবল চেষ্টা'),
-              Icons.casino_rounded,
-              active ? () => _send('jailRoll') : null,
+            Text(
+              t.choose(
+                'Close this sheet and tap the two dice on the board to try doubles.',
+                'ডাবল পাওয়ার চেষ্টা করতে প্যানেল বন্ধ করে বোর্ডের পাশায় চাপুন।',
+              ),
+              style: TextStyle(
+                fontFamily: t.font,
+                fontFamilyFallback: t.fallbackFonts,
+                color: Colors.white70,
+              ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             _secondary(
               '${t.choose('PAY FINE', 'জরিমানা দিন')} '
               '(${t.money(50)})',
@@ -629,12 +1135,6 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
             ),
           ],
           if (engine.phase == TurnPhase.complete) ...[
-            _primary(
-              t.choose('END TURN', 'চাল শেষ করুন'),
-              Icons.navigate_next,
-              active ? () => _send('endTurn') : null,
-            ),
-            const SizedBox(height: 8),
             _secondary(
               t.choose('MANAGE PROPERTIES', 'সম্পত্তি পরিচালনা'),
               active ? _showMyProperties : null,
@@ -661,6 +1161,11 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                 fontWeight: FontWeight.bold,
                 fontSize: 24,
               ),
+            ),
+            const SizedBox(height: 12),
+            _secondary(
+              t.choose('FINAL STANDINGS', 'চূড়ান্ত ফলাফল'),
+              () => VictoryStandingsSheet.show(context, game: engine, text: t),
             ),
           ],
           if (engine.phase != TurnPhase.gameOver &&
@@ -979,6 +1484,8 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                             'Cash you pay (0 or more)',
                             'আপনি যে টাকা দেবেন (০ বা বেশি)',
                           ),
+                          prefixText: t.bn ? '৳' : r'$',
+                          prefixStyle: const TextStyle(color: kBoardGold),
                           labelStyle: TextStyle(
                             fontFamily: t.font,
                             color: Colors.white70,
@@ -997,6 +1504,8 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                             'Cash you request (0 or more)',
                             'আপনি যে টাকা চাইবেন (০ বা বেশি)',
                           ),
+                          prefixText: t.bn ? '৳' : r'$',
+                          prefixStyle: const TextStyle(color: kBoardGold),
                           labelStyle: TextStyle(
                             fontFamily: t.font,
                             color: Colors.white70,
@@ -1073,20 +1582,38 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
     Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          t.choose('RECENT EVENTS', 'সাম্প্রতিক ঘটনা'),
-          style: TextStyle(
-            fontFamily: t.font,
-            color: kBoardGold,
-            fontWeight: FontWeight.bold,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                t.choose('RECENT EVENTS', 'সাম্প্রতিক ঘটনা'),
+                style: TextStyle(
+                  fontFamily: t.font,
+                  color: kBoardGold,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () => GameActivitySheet.show(
+                context,
+                text: t,
+                events: List<String>.of(game!.log),
+              ),
+              icon: const Icon(Icons.history, size: 16),
+              label: Text(
+                t.choose('All', 'সব'),
+                style: TextStyle(fontFamily: t.font),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 8),
         for (final item in game!.log.take(8))
           Padding(
             padding: const EdgeInsets.only(bottom: 7),
             child: Text(
-              '• $item',
+              '• ${t.moneyInEvent(item)}',
               style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ),
@@ -1145,9 +1672,6 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
     final property = engine.properties[index];
     final ownedByMe = property.ownerId == room.playerId;
     final allowed = room.isMyTurn && room.pendingTrade == null && ownedByMe;
-    final ownerName = property.ownerId == null
-        ? t.choose('Unowned', 'মালিকবিহীন')
-        : engine.players[property.ownerId!].name;
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1167,38 +1691,13 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(height: 8, color: groupColor(tile.group)),
-                  const SizedBox(height: 14),
-                  Text(
-                    t.spaceName(tile.index, tile.name),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontFamily: t.font,
-                      fontFamilyFallback: t.fallbackFonts,
-                      color: kBoardGold,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
+                  AnimatedDeedEntrance(
+                    child: PropertyDeedCard(
+                      game: engine,
+                      text: t,
+                      spaceIndex: index,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    '${t.choose('Owner', 'মালিক')}: $ownerName',
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                  Text(
-                    '${t.choose('Price', 'দাম')}: ${t.money(tile.price)}',
-                    style: const TextStyle(color: Colors.white70),
-                  ),
-                  Text(
-                    '${t.choose('Buildings', 'ভবন')}: '
-                    '${property.development == 5 ? t.choose('Hotel', 'হোটেল') : t.integer(property.development)}',
-                    style: const TextStyle(color: Colors.white70),
-                  ),
-                  if (property.mortgaged)
-                    Text(
-                      t.choose('MORTGAGED', 'বন্ধক দেওয়া'),
-                      style: const TextStyle(color: Colors.orangeAccent),
-                    ),
                   const SizedBox(height: 15),
                   // Server still validates every action, including phase and cash.
                   if (allowed &&

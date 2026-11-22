@@ -12,6 +12,9 @@ class FontPreferences extends ChangeNotifier {
   static final FontPreferences instance = FontPreferences();
   static const String _banglaKey = 'bhive_font_bangla_v1';
   static const String _englishKey = 'bhive_font_english_v1';
+  // One-time upgrade of the former Hadi default on existing installations.
+  static const String _karnaphuliMigrationKey =
+      'bhive_font_migrated_to_karnaphuli_v1';
 
   String _bangla = FontCatalog.defaultBangla;
   String _english = FontCatalog.defaultEnglish;
@@ -38,7 +41,27 @@ class FontPreferences extends ChangeNotifier {
 
   Future<void> _readFromStorage() async {
     final preferences = await SharedPreferences.getInstance();
-    _bangla = FontCatalog.validated('bn', preferences.getString(_banglaKey));
+    // The old app default was Hadi. Migrate it once so existing users also
+    // get Karnaphuli after upgrading, without resetting Nikosh choices.
+    // Once the marker is stored, explicitly choosing Hadi stays respected.
+    final hasMigrated =
+        preferences.getBool(_karnaphuliMigrationKey) ?? false;
+    var savedBangla = preferences.getString(_banglaKey);
+    if (!hasMigrated) {
+      if (savedBangla == 'Hadi') {
+        if (!await preferences.setString(
+          _banglaKey,
+          FontCatalog.defaultBangla,
+        )) {
+          throw StateError('Could not migrate Bangla font preference');
+        }
+        savedBangla = FontCatalog.defaultBangla;
+      }
+      if (!await preferences.setBool(_karnaphuliMigrationKey, true)) {
+        throw StateError('Could not store Bangla font migration');
+      }
+    }
+    _bangla = FontCatalog.validated('bn', savedBangla);
     _english = FontCatalog.validated('en', preferences.getString(_englishKey));
     _loaded = true;
     notifyListeners();

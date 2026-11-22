@@ -1,9 +1,6 @@
-// ignore_for_file: unnecessary_import
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -77,19 +74,48 @@ class LanMoveEvent {
   };
 
   factory LanMoveEvent.fromWire(Map<String, dynamic> wire) {
+    final sequence = wire['sequence'];
+    final action = wire['action'];
+    final actorId = wire['actorId'];
+    final start = wire['startPosition'];
+    final end = wire['endPosition'];
+    if (sequence is! int ||
+        sequence < 1 ||
+        action is! String ||
+        action.isEmpty ||
+        action.length > 60 ||
+        actorId is! int ||
+        actorId < 0 ||
+        actorId >= 6 ||
+        (start != null && (start is! int || start < 0 || start >= 40)) ||
+        (end != null && (end is! int || end < 0 || end >= 40))) {
+      throw const FormatException('Invalid LAN action event.');
+    }
     final roll = wire['dice'];
+    DiceRoll? validatedRoll;
+    if (roll != null) {
+      if (roll is! Map<String, dynamic>) {
+        throw const FormatException('Invalid LAN dice.');
+      }
+      final first = roll['first'];
+      final second = roll['second'];
+      if (first is! int ||
+          first < 1 ||
+          first > 6 ||
+          second is! int ||
+          second < 1 ||
+          second > 6) {
+        throw const FormatException('Invalid LAN dice values.');
+      }
+      validatedRoll = DiceRoll(first, second);
+    }
     return LanMoveEvent(
-      sequence: wire['sequence'] as int,
-      action: wire['action'] as String,
-      actorId: wire['actorId'] as int,
-      startPosition: wire['startPosition'] as int?,
-      endPosition: wire['endPosition'] as int?,
-      dice: roll == null
-          ? null
-          : DiceRoll(
-              (roll as Map<String, dynamic>)['first'] as int,
-              roll['second'] as int,
-            ),
+      sequence: sequence,
+      action: action,
+      actorId: actorId,
+      startPosition: start,
+      endPosition: end,
+      dice: validatedRoll,
     );
   }
 }
@@ -728,22 +754,30 @@ class LanRoomController extends ChangeNotifier {
           paused = data['paused'] as bool;
           break;
         case 'state':
+          // Parse the complete envelope before mutating any game fields.
+          // LanGameCodec also validates the entire board before applying it.
           final snapshot = data['state'] as Map<String, dynamic>;
+          final incomingPaused = data['paused'];
+          if (incomingPaused is! bool) {
+            throw const FormatException('Missing room pause state.');
+          }
+          final tradeWire = data['pendingTrade'];
+          final incomingTrade = tradeWire == null
+              ? null
+              : LanPendingTrade.fromWire(tradeWire as Map<String, dynamic>);
+          final event = data['event'];
+          final incomingEvent = event == null
+              ? null
+              : LanMoveEvent.fromWire(event as Map<String, dynamic>);
           if (game == null) {
             game = LanGameCodec.decode(snapshot);
           } else {
             LanGameCodec.apply(game!, snapshot);
           }
           started = true;
-          paused = data['paused'] as bool;
-          final tradeWire = data['pendingTrade'];
-          _trade.pending = tradeWire == null
-              ? null
-              : LanPendingTrade.fromWire(tradeWire as Map<String, dynamic>);
-          final event = data['event'];
-          lastEvent = event == null
-              ? null
-              : LanMoveEvent.fromWire(event as Map<String, dynamic>);
+          paused = incomingPaused;
+          _trade.pending = incomingTrade;
+          lastEvent = incomingEvent;
           break;
         case 'error':
           _error(data['message'] as String? ?? 'Unknown network error.');

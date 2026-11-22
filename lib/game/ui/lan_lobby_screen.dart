@@ -1,7 +1,4 @@
-// ignore_for_file: unnecessary_import
-
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -10,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../network/lan_room_controller.dart';
 import '../network/lan_discovery.dart';
 import '../network/lan_avatar_codec.dart';
+import '../network/lan_avatar_compressor.dart';
 import 'widgets/lan_avatar_badge.dart';
 import 'game_text.dart';
 import 'game_typography.dart';
@@ -126,15 +124,21 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
     setState(() {});
   }
 
+  Future<Uint8List?> _lanPhoto() async {
+    if (!_sharePhoto) return null;
+    return LanAvatarCompressor.compress(widget.avatarBytes);
+  }
+
   Future<void> _create() async {
     if (_loading) return;
     setState(() => _loading = true);
     try {
+      final photo = await _lanPhoto();
       final room = await LanRoomController.host(
         name: _name.text,
         maxPlayers: _maxPlayers,
         avatarIndex: _avatarIndex,
-        avatarBytes: _sharePhoto ? widget.avatarBytes : null,
+        avatarBytes: photo,
       );
       if (!mounted) {
         await room.shutdown();
@@ -153,6 +157,7 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
     if (_loading) return;
     setState(() => _loading = true);
     try {
+      final photo = await _lanPhoto();
       final ipText = _ip.text.trim();
       final host = ipText.contains(':') ? ipText.split(':').first : ipText;
       final portText = ipText.contains(':') ? ipText.split(':').last : '';
@@ -166,7 +171,7 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
         pin: _pin.text,
         port: port,
         avatarIndex: _avatarIndex,
-        avatarBytes: _sharePhoto ? widget.avatarBytes : null,
+        avatarBytes: photo,
       );
       if (!mounted) {
         await room.shutdown();
@@ -377,10 +382,10 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
             ),
             subtitle: Text(
               t.choose(
-                'Optional; photos are sent over local '
-                    'Wi-Fi without encryption. Photos above 64 KB use the preset.',
-                'ঐচ্ছিক; স্থানীয় ওয়াই-ফাইতে ছবি এনক্রিপশন ছাড়া যাবে। '
-                    '৬৪ কেবির বেশি হলে অবতার দেখাবে।',
+                'Optional: images are resized to fit 64 KB. '
+                    'Photos are shared over local Wi-Fi without encryption.',
+                'ঐচ্ছিক: ছবি ছোট করে ৬৪ কেবির মধ্যে রাখা হয়। '
+                    'স্থানীয় ওয়াই-ফাইতে এনক্রিপশন ছাড়া পাঠানো হবে।',
               ),
               style: TextStyle(
                 fontFamily: t.font,

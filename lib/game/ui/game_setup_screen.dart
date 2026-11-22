@@ -89,6 +89,7 @@ class _GameSetupScreenState extends State<GameSetupScreen> {
                 languageCode: widget.languageCode,
                 botDifficulties: saved.botDifficulties,
                 resumedGame: saved.game,
+                matchId: saved.matchId,
               ),
             ),
           ),
@@ -217,6 +218,20 @@ class _GameSetupScreenState extends State<GameSetupScreen> {
                             color: Colors.white70,
                           ),
                         ),
+                        if (_resume!.recoveredFromBackup) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            t.choose(
+                              'Recovered the previous valid checkpoint. The latest turn may not be included.',
+                              'আগের সঠিক সংরক্ষণ থেকে খেলা উদ্ধার হয়েছে। সর্বশেষ চালটি নাও থাকতে পারে।',
+                            ),
+                            style: TextStyle(
+                              fontFamily: t.font,
+                              color: Colors.orangeAccent,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 12),
                         FilledButton.icon(
                           onPressed: _continueSavedGame,

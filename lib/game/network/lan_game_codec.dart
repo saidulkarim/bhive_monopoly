@@ -1,5 +1,6 @@
 import '../engine/game_engine.dart';
 import '../models/game_models.dart';
+import '../validation/game_snapshot_validator.dart';
 
 /// Read-only wire projection of the host's authoritative engine.
 /// Never use a client-side restored engine to make rules decisions: private
@@ -52,6 +53,7 @@ class LanGameCodec {
   };
 
   static GameEngine decode(Map<String, dynamic> data) {
+    GameSnapshotValidator.validateLan(data);
     final playersData = (data['players'] as List).cast<Map<String, dynamic>>();
     final game = GameEngine(
       playerNames: playersData.map((p) => p['name'] as String).toList(),
@@ -62,6 +64,12 @@ class LanGameCodec {
 
   /// Mutates public presentation fields only. Used exclusively by LAN guests.
   static void apply(GameEngine game, Map<String, dynamic> data) {
+    // Preflight the ENTIRE snapshot before touching a single live field.
+    // A malformed host packet must never leave a half-updated guest board.
+    GameSnapshotValidator.validateLan(
+      data,
+      expectedNames: [for (final player in game.players) player.name],
+    );
     final ps = (data['players'] as List).cast<Map<String, dynamic>>();
     final tiles = (data['properties'] as List).cast<Map<String, dynamic>>();
     if (ps.length != game.players.length || tiles.length != 40) {

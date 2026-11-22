@@ -25,7 +25,7 @@ class FontCatalog {
   static const String defaultEnglish = 'Exo2';
 
   static const List<FontChoice> banglaFonts = <FontChoice>[
-    FontChoice(family: 'KarnaphuliMJ', label: 'Karnaphuli', languageCode: 'bn'),
+    FontChoice(family: 'Karnaphuli', label: 'Karnaphuli', languageCode: 'bn'),
     FontChoice(family: 'Hadi', label: 'Hadi', languageCode: 'bn'),
     FontChoice(family: 'Nikosh', label: 'Nikosh', languageCode: 'bn'),
     // Example after registering new asset:
@@ -60,16 +60,20 @@ class FontCatalog {
       : defaultFor(languageCode);
 
   /// Preferred fallback order for missing glyphs, not aesthetic replacement.
-  /// In the initial Bangla setup, Hadi is primary and Nikosh is fallback.
+  /// Karnaphuli is the default Bangla font; Nikosh is its fallback.
   static List<String> fallbacks(String languageCode, String primaryFamily) {
-    if (languageCode == 'bn') {
-      final fallback = <String>[
-        if (primaryFamily != 'Nikosh' && isAllowed('bn', 'Nikosh')) 'Nikosh',
-        if (primaryFamily != 'Hadi' && isAllowed('bn', 'Hadi')) 'Hadi',
-      ];
-      return fallback;
-    }
-    if (primaryFamily != 'Exo2') return const <String>['Exo2'];
-    return const <String>[];
+    // The selected primary font MUST NOT appear in its fallback list.
+    // Keep the fixed fallback priority while supporting future font additions.
+    final allowed = forLanguage(languageCode);
+    final candidates = languageCode == 'bn'
+        ? const <String>['Nikosh', 'Karnaphuli']
+        : const <String>['Exo2'];
+
+    return candidates
+        .where((font) {
+          return font != primaryFamily &&
+              allowed.any((choice) => choice.family == font);
+        })
+        .toList(growable: false);
   }
 }
