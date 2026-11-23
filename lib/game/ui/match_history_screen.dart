@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/ui/app_notices.dart';
+
 import '../persistence/match_history_store.dart';
 import 'game_text.dart';
 import 'widgets/game_board_view.dart';
@@ -49,7 +51,7 @@ class _MatchHistoryScreenState extends State<MatchHistoryScreen> {
       if (mounted) _reload();
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppNotices.of(context).showSnackBar(
         SnackBar(
           content: Text(
             t.choose('Unable to delete history.', 'ইতিহাস মুছে ফেলা যায়নি।'),

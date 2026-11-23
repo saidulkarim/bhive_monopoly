@@ -4,13 +4,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/theme/app_theme.dart';
+import 'core/ui/app_notices.dart';
+import 'core/utils/currency_preferences.dart';
+import 'game/experience/player_palette.dart';
 import 'core/fonts/font_app_builder.dart';
 import 'l10n/generated/app_localizations.dart';
 import 'providers/app_controller.dart';
 import 'ui/screens/home_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Future.wait(<Future<void>>[
+    CurrencyPreferences.instance.ensureLoaded(),
+    PlayerColorPreferences.instance.ensureLoaded(),
+  ]);
   runApp(const ProviderScope(child: MonopolyApp()));
 }
 
@@ -28,7 +35,7 @@ class MonopolyApp extends ConsumerWidget {
       // Keep the saved choice effective on every route and dialog.
       builder: (context, child) => FontAppBuilder(
         languageCode: language,
-        child: child ?? const SizedBox.shrink(),
+        child: AppNoticeOverlay(child: child ?? const SizedBox.shrink()),
       ),
       locale: Locale(language),
       supportedLocales: AppLocalizations.supportedLocales,

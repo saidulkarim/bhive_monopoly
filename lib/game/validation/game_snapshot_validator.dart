@@ -67,6 +67,7 @@ class GameSnapshotValidator {
 
     final names = <String>{};
     final bankrupt = <bool>[];
+    final seenColors = <int>{};
     var totalJailCards = 0;
     for (var i = 0; i < players.length; i++) {
       final player = _map(players[i], 'player $i');
@@ -80,6 +81,17 @@ class GameSnapshotValidator {
       }
       if (!offline && player['id'] != i) {
         throw FormatException('Invalid player ID at $i.');
+      }
+      if (player.containsKey('colorIndex')) {
+        final color = _int(
+          player['colorIndex'],
+          'player color',
+          min: 0,
+          max: 11,
+        );
+        if (!seenColors.add(color)) {
+          throw const FormatException('Player colours must be unique.');
+        }
       }
       _int(player['balance'], 'player balance');
       _int(player['position'], 'player position', min: 0, max: 39);

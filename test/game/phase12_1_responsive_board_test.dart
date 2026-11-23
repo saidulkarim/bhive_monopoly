@@ -55,21 +55,36 @@ void main() {
     final expand = find.byIcon(Icons.open_in_full_rounded);
     expect(expand, findsOneWidget);
     await tester.tap(expand);
-    await tester.pumpAndSettle();
+    // Continuous glossy tile highlights deliberately never settle.
+    // Pump the navigation transition explicitly instead of pumpAndSettle.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 450));
     expect(find.byType(BoardExplorerScreen), findsOneWidget);
 
     final showList = find.text('All 40');
     expect(showList, findsOneWidget);
     await tester.tap(showList);
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(find.byType(ListTile), findsWidgets);
 
-    final riverWalk = find.text('River Walk');
-    expect(riverWalk, findsOneWidget);
-    await tester.ensureVisible(riverWalk);
-    await tester.tap(riverWalk);
-    await tester.pumpAndSettle();
+    // The board and tile list can both render "River Walk" during the
+    // explorer transition. Select the ListTile, not an ambiguous text match.
+    final riverWalkTile = find.widgetWithText(ListTile, 'River Walk');
+    expect(riverWalkTile, findsOneWidget);
+    await tester.ensureVisible(riverWalkTile);
+    await tester.tap(riverWalkTile);
+    // Tapping the list row calls Navigator.pop(), but a full-screen route
+    // remains mounted until its reverse transition is fully completed.
+    // One large pump is not always sufficient to dispose the route.
+    // Do not use pumpAndSettle(): continuously glowing player positions
+    // intentionally schedule animation frames without ever settling.
+    await tester.pump();
+    for (var frame = 0; frame < 20; frame++) {
+      if (find.byType(BoardExplorerScreen).evaluate().isEmpty) break;
+      await tester.pump(const Duration(milliseconds: 100));
+    }
 
+    // Verify both the selection and the completed return to the game page.
     expect(selectedTile, 1);
     expect(find.byType(BoardExplorerScreen), findsNothing);
   });

@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import '../../core/ui/app_notices.dart';
 import 'package:flutter/services.dart';
 
 import '../network/lan_room_controller.dart';
@@ -13,6 +15,7 @@ import 'game_text.dart';
 import 'game_typography.dart';
 import 'lan_board_screen.dart';
 import 'widgets/game_board_view.dart';
+import '../experience/player_palette.dart';
 
 /// Same-router Wi-Fi room. Android/desktop hosts; Android/Web may join by IP.
 class LanLobbyScreen extends StatefulWidget {
@@ -96,7 +99,7 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
       _shownErrorRevision = room.errorRevision;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || room.lastError == null) return;
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppNotices.of(context).showSnackBar(
           SnackBar(
             content: Text(room.lastError!),
             backgroundColor: const Color(0xFF9C423C),
@@ -189,7 +192,7 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
 
   void _showError(String error) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    AppNotices.of(context).showSnackBar(
       SnackBar(content: Text(error), backgroundColor: const Color(0xFF9C423C)),
     );
   }
@@ -356,7 +359,7 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
                           ? widget.avatarBytes
                           : null,
                     ),
-                    color: tokenColors[n],
+                    color: PlayerColorPreferences.instance.colorFor(n),
                     radius: 20,
                   ),
                 ),
@@ -618,7 +621,7 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
             contentPadding: EdgeInsets.zero,
             leading: LanAvatarBadge(
               member: member,
-              color: tokenColors[member.id],
+              color: PlayerColorPreferences.instance.colorFor(member.id),
               radius: 20,
             ),
             title: Text(

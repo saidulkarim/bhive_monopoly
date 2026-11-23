@@ -1,9 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import '../../core/ui/app_notices.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 
 import '../experience/token_preferences.dart';
+import '../experience/player_palette.dart';
 import 'game_text.dart';
 import 'widgets/game_board_view.dart';
 
@@ -42,7 +45,7 @@ class _TokenSettingsScreenState extends State<TokenSettingsScreen> {
       if (mounted) setState(() {});
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppNotices.of(context).showSnackBar(
         SnackBar(
           content: Text(
             t.choose(
@@ -163,7 +166,8 @@ class _TokenSettingsScreenState extends State<TokenSettingsScreen> {
                                     : Center(
                                         child: Icon(
                                           selected.icon,
-                                          color: tokenColors[seat],
+                                          color: PlayerColorPreferences.instance
+                                              .colorFor(seat),
                                           size: 104,
                                         ),
                                       ),

@@ -73,7 +73,7 @@ void main() {
     expect(find.text('CASH LEADER'), findsOneWidget);
   });
 
-  testWidgets('Full-screen auction offers a one-tap reopen bid button',
+  testWidgets('Full-screen auction uses a compact app-bar reopen action',
       (tester) async {
     final game = GameEngine(playerNames: <String>['Player', 'Computer 1']);
     game.roll(1, 2);
@@ -89,10 +89,41 @@ void main() {
       ),
     ));
 
+    // The sheet opens automatically in the owning screen, so there must be
+    // no large full-width call-to-action covering the explorer's board.
     expect(find.byKey(const ValueKey<String>('explorer-review-decision')),
-        findsOneWidget);
-    await tester.tap(find.text('OPEN BID'));
+        findsNothing);
+    expect(find.text('OPEN BID'), findsNothing);
+    expect(find.text('REVIEW OPTIONS'), findsNothing);
+    final reopen = find.byKey(
+      const ValueKey<String>('explorer-pending-decision-action'),
+    );
+    expect(reopen, findsOneWidget);
+    expect(find.byTooltip('Open bidding'), findsOneWidget);
+    await tester.tap(reopen);
     expect(reviews, 1);
+  });
+
+  testWidgets('Full-screen has no decision action during a normal roll',
+      (tester) async {
+    final game = GameEngine(playerNames: <String>['Player', 'Computer 1']);
+    await tester.pumpWidget(MaterialApp(
+      home: BoardExplorerScreen(
+        game: game,
+        text: const GameText('en'),
+        onSelect: (_) {},
+        onReviewDecision: () {},
+        // An accidentally permissive callback must not show an action
+        // outside the purchase, auction, jail, and debt phases.
+        decisionEnabled: () => true,
+      ),
+    ));
+
+    expect(find.byKey(const ValueKey<String>('explorer-review-decision')),
+        findsNothing);
+    expect(find.byKey(
+      const ValueKey<String>('explorer-pending-decision-action')),
+        findsNothing);
   });
 
   testWidgets('Full-screen cash balances follow replacement LAN snapshots',

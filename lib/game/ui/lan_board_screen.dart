@@ -1,9 +1,9 @@
-// ignore_for_file: invalid_use_of_visible_for_testing_member, invalid_use_of_protected_member
-
 import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+
+import '../../core/ui/app_notices.dart';
 
 import '../engine/game_engine.dart';
 import '../experience/game_audio.dart';
@@ -56,7 +56,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
   int _seenError = 0;
   Future<void>? _completedHistoryWrite;
   bool _historyQueued = false;
-  final ChangeNotifier _boardUpdates = ChangeNotifier();
+  final ValueNotifier<int> _boardUpdates = ValueNotifier<int>(0);
   bool _boardActionPending = false;
   Timer? _boardActionCooldown;
   bool _decisionOpen = false;
@@ -90,7 +90,9 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
       if (!mounted || !_needsDecision || !_canMakeDecision || _decisionOpen) {
         return;
       }
-      if (_decisionKey != _autoDecisionKey) _openDecisionSheet();
+      if (_decisionKey != _autoDecisionKey) {
+        _openDecisionSheet();
+      }
     });
   }
 
@@ -276,7 +278,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
     unawaited(
       _completedHistoryWrite!.catchError((Object error) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppNotices.of(context).showSnackBar(
             SnackBar(
               content: Text(
                 t.choose(
@@ -344,7 +346,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
       _seenError = room.errorRevision;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || room.lastError == null) return;
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppNotices.of(context).showSnackBar(
           SnackBar(
             content: Text(t.moneyInEvent(room.lastError!)),
             backgroundColor: const Color(0xFF9C423C),
@@ -378,7 +380,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
       }
     }
     setState(() {});
-    _boardUpdates.notifyListeners();
+    _boardUpdates.value++;
     _closeDecisionIfFinished();
     _scheduleDecisionPrompt();
   }
@@ -465,7 +467,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
         await Future<void>.delayed(const Duration(milliseconds: 72));
         if (!mounted || epoch != _animationEpoch) return;
         setState(() => _positions[event.actorId] = (from + step) % 40);
-        _boardUpdates.notifyListeners();
+        _boardUpdates.value++;
       }
     }
     if (!mounted || epoch != _animationEpoch) return;
@@ -478,7 +480,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
       }
       _dicePreview = null;
     });
-    _boardUpdates.notifyListeners();
+    _boardUpdates.value++;
   }
 
   bool get _canUseBoardActions =>
@@ -491,13 +493,13 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
   void _sendBoardActionOnce(String action) {
     if (!_canUseBoardActions) return;
     setState(() => _boardActionPending = true);
-    _boardUpdates.notifyListeners();
+    _boardUpdates.value++;
     _send(action);
     _boardActionCooldown?.cancel();
     _boardActionCooldown = Timer(const Duration(seconds: 3), () {
       if (!mounted) return;
       setState(() => _boardActionPending = false);
-      _boardUpdates.notifyListeners();
+      _boardUpdates.value++;
     });
   }
 
@@ -1054,7 +1056,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                     '${t.choose('Bid at least', 'সর্বনিম্ন দর')} '
                     '${t.money(auction.minimumBid)}',
                 labelStyle: const TextStyle(color: Colors.white70),
-                prefixText: t.bn ? '৳' : r'$',
+                prefixText: t.money(0).substring(0, 1),
                 prefixStyle: const TextStyle(color: kBoardGold),
               ),
             ),
@@ -1069,7 +1071,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                         _send('bid', amount: value);
                         _bid.clear();
                       } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        AppNotices.of(context).showSnackBar(
                           SnackBar(
                             content: Text(
                               t.choose(
@@ -1484,7 +1486,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                             'Cash you pay (0 or more)',
                             'আপনি যে টাকা দেবেন (০ বা বেশি)',
                           ),
-                          prefixText: t.bn ? '৳' : r'$',
+                          prefixText: t.money(0).substring(0, 1),
                           prefixStyle: const TextStyle(color: kBoardGold),
                           labelStyle: TextStyle(
                             fontFamily: t.font,
@@ -1504,7 +1506,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                             'Cash you request (0 or more)',
                             'আপনি যে টাকা চাইবেন (০ বা বেশি)',
                           ),
-                          prefixText: t.bn ? '৳' : r'$',
+                          prefixText: t.money(0).substring(0, 1),
                           prefixStyle: const TextStyle(color: kBoardGold),
                           labelStyle: TextStyle(
                             fontFamily: t.font,
@@ -1526,7 +1528,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                     final from = int.tryParse(cashFrom.text.trim());
                     final to = int.tryParse(cashTo.text.trim());
                     if (from == null || to == null || from < 0 || to < 0) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      AppNotices.of(context).showSnackBar(
                         SnackBar(
                           content: Text(
                             t.choose(
@@ -1542,7 +1544,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                         requested.isEmpty &&
                         from == 0 &&
                         to == 0) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      AppNotices.of(context).showSnackBar(
                         SnackBar(
                           content: Text(
                             t.choose(
@@ -1782,9 +1784,9 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
         title: Text(t.choose('Bank inventory', 'ব্যাংকের মজুত')),
         content: Text(
           '${t.choose('Houses', 'বাড়ি')}: '
-          '${t.integer(engine.bankHouses)}/32\n'
+          '${t.integer(engine.bankHouses)}/${t.integer(32)}\n'
           '${t.choose('Hotels', 'হোটেল')}: '
-          '${t.integer(engine.bankHotels)}/12',
+          '${t.integer(engine.bankHotels)}/${t.integer(12)}',
         ),
         actions: [
           TextButton(

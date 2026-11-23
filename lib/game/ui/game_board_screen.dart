@@ -1,14 +1,15 @@
-// ignore_for_file: invalid_use_of_visible_for_testing_member, invalid_use_of_protected_member
-
 import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import '../../core/ui/app_notices.dart';
+
 import '../ai/bot_controller.dart';
 import '../experience/game_audio.dart';
 import '../experience/game_experience_settings.dart';
 import '../experience/token_preferences.dart';
+import '../experience/player_palette.dart';
 import '../experience/board_camera_preset.dart';
 import '../engine/game_engine.dart';
 import '../models/game_models.dart';
@@ -64,14 +65,14 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
   bool _busy = false;
   Future<void>? _completedHistoryWrite;
   final TextEditingController bidController = TextEditingController();
-  final ChangeNotifier _boardUpdates = ChangeNotifier();
+  final ValueNotifier<int> _boardUpdates = ValueNotifier<int>(0);
   final ValueNotifier<int> _decisionRevision = ValueNotifier<int>(0);
   bool _decisionOpen = false;
   String? _autoDecisionKey;
   BuildContext? _decisionContext;
 
   void _updateBoard() {
-    _boardUpdates.notifyListeners();
+    _boardUpdates.value++;
   }
 
   bool get _needsDecision =>
@@ -99,7 +100,9 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
           _actingBotId != null) {
         return;
       }
-      if (_autoDecisionKey != _decisionKey) _openDecisionSheet();
+      if (_autoDecisionKey != _decisionKey) {
+        _openDecisionSheet();
+      }
     });
   }
 
@@ -247,7 +250,12 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
     _matchId =
         widget.matchId ??
         '${DateTime.now().toUtc().microsecondsSinceEpoch}-${_random.nextInt(1 << 30)}';
-    game = widget.resumedGame ?? GameEngine(playerNames: widget.playerNames);
+    game =
+        widget.resumedGame ??
+        GameEngine(
+          playerNames: widget.playerNames,
+          colorIndices: PlayerColorPreferences.instance.selections,
+        );
     t = GameText(widget.languageCode);
     unawaited(GameExperienceSettings.instance.ensureLoaded());
     unawaited(TokenPreferences.instance.ensureLoaded());
@@ -313,8 +321,8 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
       return true;
     } on GameRuleException catch (error) {
       if (!mounted) return false;
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppNotices.of(context).hideCurrentSnackBar();
+      AppNotices.of(context).showSnackBar(
         SnackBar(
           content: Text(t.moneyInEvent(error.message)),
           behavior: SnackBarBehavior.floating,
@@ -348,7 +356,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
       operation
           .then((_) {
             if (mounted && showMessage) {
-              ScaffoldMessenger.of(context).showSnackBar(
+              AppNotices.of(context).showSnackBar(
                 SnackBar(
                   content: Text(
                     t.choose(
@@ -362,7 +370,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
           })
           .catchError((Object error) {
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
+              AppNotices.of(context).showSnackBar(
                 SnackBar(
                   content: Text(
                     t.choose(
@@ -826,7 +834,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
                   children: [
                     CircleAvatar(
                       radius: 13,
-                      backgroundColor: tokenColors[p.id],
+                      backgroundColor: PlayerPalette.at(p.colorIndex),
                       child: Icon(
                         _isBot(p.id)
                             ? Icons.smart_toy_rounded
@@ -1044,7 +1052,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
                   '${t.choose('Minimum', 'সর্বনিম্ন')}: '
                   '${t.money(a.minimumBid)}',
               labelStyle: const TextStyle(color: kBoardGold),
-              prefixText: t.bn ? '৳' : r'$',
+              prefixText: t.money(0).substring(0, 1),
               prefixStyle: const TextStyle(color: kBoardGold),
               border: const OutlineInputBorder(),
             ),
@@ -1273,9 +1281,9 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
       title: Text(t.choose('Bank inventory', 'ব্যাংকের মজুত')),
       content: Text(
         '${t.choose('Available houses', 'অবশিষ্ট বাড়ি')}: '
-        '${t.integer(game.bankHouses)}/৩২\n'
+        '${t.integer(game.bankHouses)}/${t.integer(32)}\n'
         '${t.choose('Available hotels', 'অবশিষ্ট হোটেল')}: '
-        '${t.integer(game.bankHotels)}/১২',
+        '${t.integer(game.bankHotels)}/${t.integer(12)}',
       ),
       actions: [
         TextButton(
@@ -1493,7 +1501,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
                   labelText: t.choose('Offer price', 'প্রস্তাবিত মূল্য'),
-                  prefixText: t.bn ? '৳' : r'$',
+                  prefixText: t.money(0).substring(0, 1),
                 ),
               ),
               const SizedBox(height: 9),

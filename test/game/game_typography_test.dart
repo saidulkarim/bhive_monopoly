@@ -22,12 +22,18 @@ void main() {
     expect(bn.spaceName(100, 'Unknown'), 'Unknown');
   });
 
-  testWidgets('Material theme switches fonts when language changes', (tester) async {
+  testWidgets('Material theme switches fonts when language changes', (
+    tester,
+  ) async {
     Future<void> pumpLanguage(String code) async {
-      await tester.pumpWidget(MaterialApp(home: GameTypography(
-        languageCode: code,
-        child: const Scaffold(body: Text('Sample')),
-      )));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: GameTypography(
+            languageCode: code,
+            child: const Scaffold(body: Text('Sample')),
+          ),
+        ),
+      );
     }
 
     await pumpLanguage('bn');

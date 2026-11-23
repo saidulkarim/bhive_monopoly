@@ -19,7 +19,8 @@ class GameText {
   }
 
   /// The game's single currency formatter, shared with the home screen.
-  /// English: $1,500; Bangla: ৳১,৫০০ (lakh/crore grouping for large amounts).
+  /// Currency choice is independent of language, with legacy defaults
+  /// English/USD and Bangla/BDT until the player explicitly chooses one.
   String money(int value) =>
       MoneyFormatter.format(value, languageCode: languageCode);
 

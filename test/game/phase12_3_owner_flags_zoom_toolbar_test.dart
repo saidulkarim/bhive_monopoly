@@ -17,43 +17,51 @@ void main() {
     }
   });
 
-  testWidgets('Owner pennant renders selected token icon, not seat number',
-      (tester) async {
+  testWidgets('Owner pennant renders selected token icon, not seat number', (
+    tester,
+  ) async {
     final expected = TokenPreferences.instance.styleFor(0).icon;
-    await tester.pumpWidget(const MaterialApp(
-      home: Scaffold(
-        body: Center(
-          child: OwnershipCornerBadge(
-            ownerId: 0,
-            direction: OwnerFlagDirection.down,
-            ownerName: 'Player',
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: OwnershipCornerBadge(
+              ownerId: 0,
+              direction: OwnerFlagDirection.down,
+              ownerName: 'Player',
+            ),
           ),
         ),
       ),
-    ));
+    );
 
     expect(find.byIcon(expected), findsOneWidget);
     expect(find.text('1'), findsNothing);
     expect(find.byType(OwnershipCornerBadge), findsOneWidget);
   });
 
-  testWidgets('Explorer has one horizontal zoom toolbar below board',
-      (tester) async {
+  testWidgets('Explorer has one horizontal zoom toolbar below board', (
+    tester,
+  ) async {
     final engine = GameEngine(playerNames: <String>['Player', 'Computer 1']);
-    await tester.pumpWidget(MaterialApp(
-      home: BoardExplorerScreen(
-        game: engine,
-        text: const GameText('en'),
-        onSelect: (_) {},
+    await tester.pumpWidget(
+      MaterialApp(
+        home: BoardExplorerScreen(
+          game: engine,
+          text: const GameText('en'),
+          onSelect: (_) {},
+        ),
       ),
-    ));
+    );
 
-    expect(find.byKey(const ValueKey<String>('board-zoom-toolbar')),
-        findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('board-zoom-toolbar')),
+      findsOneWidget,
+    );
     expect(find.text('100%'), findsOneWidget);
     await tester.tap(find.byTooltip('Zoom in'));
     await tester.pump();
-    expect(find.text('150%'), findsOneWidget);
+    expect(find.text('110%'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Reset zoom'));
     await tester.pump();

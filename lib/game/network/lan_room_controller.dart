@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../engine/game_engine.dart';
+import '../experience/player_palette.dart';
 import '../models/game_models.dart';
 import 'lan_action_dispatcher.dart';
 import 'lan_avatar_codec.dart';
@@ -484,6 +485,7 @@ class LanRoomController extends ChangeNotifier {
     unawaited(_discovery.stopAdvertising());
     game = GameEngine(
       playerNames: [for (final member in _members) member.name],
+      colorIndices: PlayerColorPreferences.instance.selections,
     );
     _sequence = 0;
     _trade.dismiss();

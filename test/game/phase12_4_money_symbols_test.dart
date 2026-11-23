@@ -65,14 +65,17 @@ void main() {
     const t = GameText('en');
     const line = 'Computer 1 rolled 6 + 6 = 12.';
     expect(t.moneyInEvent(line), line);
-    expect(t.moneyInEvent('Jail attempt 2/3 failed.'),
-        'Jail attempt 2/3 failed.');
+    expect(
+      t.moneyInEvent('Jail attempt 2/3 failed.'),
+      'Jail attempt 2/3 failed.',
+    );
     expect(t.moneyInEvent('TURN 11'), 'TURN 11');
-    expect(t.moneyInEvent('Player landed on River Walk.'),
-        'Player landed on River Walk.');
+    expect(
+      t.moneyInEvent('Player landed on River Walk.'),
+      'Player landed on River Walk.',
+    );
     // Already-localized text must not receive a second currency symbol.
-    expect(t.moneyInEvent(r'Player paid $25 rent.'),
-        r'Player paid $25 rent.');
+    expect(t.moneyInEvent(r'Player paid $25 rent.'), r'Player paid $25 rent.');
   });
 
   test('Bangla display uses taka and Bengali digits for money values', () {
@@ -91,8 +94,9 @@ void main() {
     );
   });
 
-  testWidgets('Expanded activity shows currency for both monetary events',
-      (tester) async {
+  testWidgets('Expanded activity shows currency for both monetary events', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       const MaterialApp(
         home: Scaffold(
@@ -107,7 +111,9 @@ void main() {
       ),
     );
     expect(find.text(r'Computer 1 paid $12 rent to Player.'), findsOneWidget);
-    expect(find.text(r'Player purchased Maple Boulevard for $220.'),
-        findsOneWidget);
+    expect(
+      find.text(r'Player purchased Maple Boulevard for $220.'),
+      findsOneWidget,
+    );
   });
 }

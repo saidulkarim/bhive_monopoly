@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../experience/token_preferences.dart';
+import '../../experience/player_palette.dart';
 import 'animated_board_tokens.dart';
 
 /// Direction of the triangular owner's pennant. Its tip always points into
@@ -96,15 +97,17 @@ class OwnershipCornerBadge extends StatelessWidget {
     required this.ownerId,
     this.direction = OwnerFlagDirection.down,
     this.ownerName,
+    this.colorIndex,
   });
 
   final int ownerId;
   final OwnerFlagDirection direction;
   final String? ownerName;
+  final int? colorIndex;
 
   @override
   Widget build(BuildContext context) {
-    if (ownerId < 0 || ownerId >= ownerFlagColors.length) {
+    if (ownerId < 0 || ownerId >= 6) {
       return const SizedBox.shrink();
     }
     final isVertical =
@@ -129,7 +132,7 @@ class OwnershipCornerBadge extends StatelessWidget {
             : OwnerFlagGeometry.longSide,
         child: CustomPaint(
           painter: _OwnerFlagPainter(
-            color: ownerFlagColors[ownerId],
+            color: PlayerPalette.at(colorIndex ?? ownerId),
             direction: direction,
           ),
           child: Align(

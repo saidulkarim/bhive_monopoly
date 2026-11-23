@@ -1,9 +1,8 @@
-// ignore_for_file: unnecessary_underscores
-
 import 'package:flutter/material.dart';
 
 import '../../engine/game_engine.dart';
 import '../../experience/token_preferences.dart';
+import '../../experience/player_palette.dart';
 import '../game_text.dart';
 import 'game_board_view.dart';
 
@@ -35,7 +34,7 @@ class CompactPlayersStrip extends StatelessWidget {
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
           itemCount: game.players.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 9),
+          separatorBuilder: (_, _) => const SizedBox(width: 9),
           itemBuilder: (context, index) {
             final p = game.players[index];
             final active = p.id == game.currentPlayerId;
@@ -73,7 +72,7 @@ class CompactPlayersStrip extends StatelessWidget {
                 children: <Widget>[
                   CircleAvatar(
                     radius: 17,
-                    backgroundColor: tokenColors[p.id % tokenColors.length],
+                    backgroundColor: PlayerPalette.at(p.colorIndex),
                     child: Icon(
                       TokenPreferences.instance.styleFor(p.id).icon,
                       color: kBoardDark,

@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/currency_preferences.dart';
 import '../../l10n/generated/app_localizations.dart';
 
 class RulesScreen extends StatelessWidget {
@@ -42,7 +43,12 @@ class RulesScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    rules[index].$2,
+                    CurrencyPreferences.instance.codeFor(
+                              Localizations.localeOf(context).languageCode,
+                            ) ==
+                            'BDT'
+                        ? rules[index].$2.replaceAll(r'$', '৳')
+                        : rules[index].$2.replaceAll('৳', r'$'),
                     style: const TextStyle(fontSize: 16, height: 1.6),
                   ),
                 ],

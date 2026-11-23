@@ -7,9 +7,11 @@ import '../../engine/game_engine.dart';
 import '../../experience/board_camera_preset.dart';
 import '../../experience/game_experience_settings.dart';
 import '../../experience/token_preferences.dart';
+import '../../experience/player_palette.dart';
 import '../../models/game_models.dart';
 import '../game_text.dart';
 import 'animated_board_tokens.dart';
+import 'active_position_glow.dart';
 import 'board_center_action.dart';
 import 'ownership_corner_badge.dart';
 
@@ -173,7 +175,7 @@ class GameBoardView extends StatelessWidget {
                               child: DecoratedBox(
                                 decoration: BoxDecoration(
                                   border: Border.all(
-                                    color: kBoardGold.withOpacity(.65),
+                                    color: kBoardGold.withValues(alpha: .65),
                                     width: 4,
                                   ),
                                   gradient: const RadialGradient(
@@ -248,6 +250,7 @@ class GameBoardView extends StatelessWidget {
           key: ValueKey<String>('owner-flag-${data.index}'),
           ownerId: ownerId,
           ownerName: engine.players[ownerId].name,
+          colorIndex: engine.players[ownerId].colorIndex,
           direction: placement.direction,
         ),
       ),
@@ -258,6 +261,24 @@ class GameBoardView extends StatelessWidget {
     final (row, col) = gridPosition(data.index);
     final state = engine.properties[data.index];
     final group = data.group;
+    // All non-bankrupt players are tracked, including human and AI/LAN
+    // opponents. Use the *visible* step so the glow follows movement.
+    final occupants = [
+      for (final player in engine.players)
+        if (!player.bankrupt &&
+            (visiblePositions[player.id] ?? player.position) == data.index)
+          player,
+    ];
+    final isCurrentPosition = occupants.any(
+      (player) => player.id == engine.currentPlayerId,
+    );
+    // When several tokens occupy a square, put the current player's colour
+    // first and paint equal-length colour segments around the perimeter.
+    occupants.sort((a, b) {
+      if (a.id == engine.currentPlayerId) return -1;
+      if (b.id == engine.currentPlayerId) return 1;
+      return a.id.compareTo(b.id);
+    });
     return Positioned(
       top: row * tile,
       left: col * tile,
@@ -270,14 +291,9 @@ class GameBoardView extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
-              color:
-                  data.index ==
-                      (visiblePositions[engine.currentPlayerId] ??
-                          engine.currentPlayer.position)
-                  ? const Color(0xFF294333)
-                  : kBoardDark,
+              color: kBoardDark,
               border: Border.all(
-                color: kBoardGold.withOpacity(0.55),
+                color: kBoardGold.withValues(alpha: 0.55),
                 width: 1.5,
               ),
             ),
@@ -288,7 +304,12 @@ class GameBoardView extends StatelessWidget {
                     if (group != null)
                       Container(height: 17, color: groupColor(group)),
                     if (state.ownerId != null)
-                      Container(height: 5, color: tokenColors[state.ownerId!]),
+                      Container(
+                        height: 5,
+                        color: PlayerPalette.at(
+                          engine.players[state.ownerId!].colorIndex,
+                        ),
+                      ),
                     const SizedBox(height: 2),
                     Text(
                       text.integer(data.index),
@@ -351,6 +372,27 @@ class GameBoardView extends StatelessWidget {
                     top: group != null ? 1 : 2,
                     right: 1,
                     child: _developmentBadge(state.development),
+                  ),
+                // Paint ABOVE the property content (but with low alpha).
+                // Phase 13.4 put a small glow BEHIND the text for only the
+                // active player, which was hard to see on Android phones.
+                if (occupants.isNotEmpty)
+                  Positioned.fill(
+                    child: ActivePositionGlow(
+                      key: ValueKey<String>(
+                        isCurrentPosition
+                            ? 'active-position-tile-${data.index}'
+                            : 'player-position-tile-${data.index}',
+                      ),
+                      color: PlayerPalette.at(occupants.first.colorIndex),
+                      colors: [
+                        for (final player in occupants)
+                          PlayerPalette.at(player.colorIndex),
+                      ],
+                      isCurrentTurn: isCurrentPosition,
+                      reducedMotion:
+                          GameExperienceSettings.instance.reducedMotion,
+                    ),
                   ),
               ],
             ),

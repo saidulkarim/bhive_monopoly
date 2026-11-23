@@ -7,16 +7,29 @@ import '../validation/game_snapshot_validator.dart';
 /// Deterministic, Flutter-independent turn engine. Roll values are injected by
 /// callers so gameplay can be unit-tested without relying on random dice.
 class GameEngine {
-  GameEngine({required List<String> playerNames, int? cardSeed})
-    : players = List<PlayerState>.generate(
-        playerNames.length,
-        (i) => PlayerState(id: i, name: playerNames[i].trim()),
-      ),
-      properties = List<PropertyState>.generate(40, (_) => PropertyState()) {
+  GameEngine({
+    required List<String> playerNames,
+    int? cardSeed,
+    List<int>? colorIndices,
+  }) : players = List<PlayerState>.generate(
+         playerNames.length,
+         (i) => PlayerState(
+           id: i,
+           name: playerNames[i].trim(),
+           colorIndex: colorIndices != null && i < colorIndices.length
+               ? colorIndices[i]
+               : i,
+         ),
+       ),
+       properties = List<PropertyState>.generate(40, (_) => PropertyState()) {
     if (players.length < 2 ||
         players.length > 6 ||
         players.any((p) => p.name.isEmpty)) {
       throw const GameRuleException('Choose 2–6 players with valid names.');
+    }
+    if (players.map((p) => p.colorIndex).toSet().length != players.length ||
+        players.any((p) => p.colorIndex < 0 || p.colorIndex >= 12)) {
+      throw const GameRuleException('Player colours must be distinct.');
     }
     final random = Random(cardSeed);
     _chanceDeck = List<int>.generate(_chance.length, (i) => i)..shuffle(random);
@@ -768,6 +781,7 @@ class GameEngine {
       for (final p in players)
         <String, dynamic>{
           'name': p.name,
+          'colorIndex': p.colorIndex,
           'balance': p.balance,
           'position': p.position,
           'inJail': p.inJail,
@@ -836,6 +850,8 @@ class GameEngine {
       for (var i = 0; i < game.players.length; i++) {
         final wire = playerData[i];
         final p = game.players[i];
+        final color = wire['colorIndex'];
+        p.colorIndex = color is int && color >= 0 && color < 12 ? color : i;
         p.balance = wire['balance'] as int;
         p.position = wire['position'] as int;
         p.inJail = wire['inJail'] as bool;
@@ -850,6 +866,10 @@ class GameEngine {
             p.jailFailedRolls > 3) {
           throw const FormatException('Invalid saved player state.');
         }
+      }
+      if (game.players.map((p) => p.colorIndex).toSet().length !=
+          game.players.length) {
+        throw const FormatException('Duplicate player colours in save.');
       }
       for (var i = 0; i < game.properties.length; i++) {
         final wire = propertyData[i];

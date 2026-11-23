@@ -132,14 +132,52 @@ void main() {
       ),
     );
     await tester.tap(find.text('Open board'));
-    await tester.pumpAndSettle();
+    // The player-location glows repeat indefinitely. pumpAndSettle cannot
+    // complete while the board is visible; instead finish the route transition
+    // using a bounded number of timed frames.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 450));
     expect(find.byType(BoardExplorerScreen), findsOneWidget);
     await tester.tap(
       find.byKey(const ValueKey<String>('board-exit-fullscreen')),
     );
-    await tester.pumpAndSettle();
+    // Route transitions can start on a later test frame; a single long
+    // pump is not a reliable way to wait for the outgoing route to unmount.
+    // Do not use pumpAndSettle: the board's position glows repeat forever.
+    await tester.pump();
+    for (var i = 0; i < 12; i++) {
+      if (find.byType(BoardExplorerScreen).evaluate().isEmpty) break;
+      await tester.pump(const Duration(milliseconds: 100));
+    }
     expect(find.byType(BoardExplorerScreen), findsNothing);
     expect(find.text('Open board'), findsOneWidget);
+  });
+
+  testWidgets('Cash advantage compares against the next richest player', (
+    tester,
+  ) async {
+    final game = GameEngine(playerNames: ['Player', 'Nova', 'Skye']);
+    game.players[0].balance = 980;
+    game.players[1].balance = 800;
+    game.players[2].balance = 460;
+    await tester.binding.setSurfaceSize(const Size(1000, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: BoardCenterAction(engine: game, text: const GameText('en')),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('CASH ADVANTAGE'), findsOneWidget);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey<String>('board-leader-cash')))
+          .data,
+      r'+$180',
+    );
   });
 
   testWidgets('Different cash leader displays actual highest balance', (

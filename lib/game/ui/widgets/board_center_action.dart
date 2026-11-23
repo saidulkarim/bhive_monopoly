@@ -55,16 +55,15 @@ class BoardCenterAction extends StatelessWidget {
     final leader = solventPlayers.isEmpty
         ? engine.currentPlayer
         : solventPlayers.reduce((a, b) => a.balance >= b.balance ? a : b);
-    // Cash figures are read from the active GameEngine on every rebuild.
-    // If the current player is the cash leader, show the *difference* over
-    // the next-richest player instead of repeating the same balance twice.
-    final otherCashBalances = solventPlayers
-        .where((p) => p.id != leader.id)
-        .map((p) => p.balance)
-        .toList();
-    final runnerUpCash = otherCashBalances.isEmpty
-        ? null
-        : otherCashBalances.reduce((a, b) => a > b ? a : b);
+    // If the current player leads, compare against the richest OTHER
+    // non-bankrupt player. Showing their own balance twice made the HUD
+    // confusing and regressed the Phase 12.6 cash-advantage behaviour.
+    final opponents = solventPlayers.where((p) => p.id != current.id).toList();
+    final highestOtherCash = opponents.isEmpty
+        ? current.balance
+        : opponents.map((p) => p.balance).reduce((a, b) => a >= b ? a : b);
+    final currentIsCashLeader = current.balance >= leader.balance;
+    final cashAdvantage = current.balance - highestOtherCash;
     final latestEvent = engine.log.isEmpty ? null : engine.log.first;
     final isAction = rolling || phase == TurnPhase.complete;
 
@@ -168,9 +167,9 @@ class BoardCenterAction extends StatelessWidget {
                 current.balance,
                 leader.name,
                 leader.balance,
-                leader.id == current.id,
+                currentIsCashLeader,
+                cashAdvantage,
                 phase == TurnPhase.auction,
-                runnerUpCash,
               ),
               const SizedBox(height: 20),
               // A generous central hit target; dice never roll when an auction,
@@ -193,12 +192,14 @@ class BoardCenterAction extends StatelessWidget {
                           value: diceOne,
                           rolling: diceRolling,
                           size: 106,
+                          dieIndex: 0,
                         ),
                         const SizedBox(width: 24),
                         RollingDiceFace(
                           value: diceTwo,
                           rolling: diceRolling,
                           size: 106,
+                          dieIndex: 1,
                         ),
                       ],
                     ),
@@ -295,8 +296,8 @@ class BoardCenterAction extends StatelessWidget {
     String leaderName,
     int leaderCash,
     bool currentIsLeader,
+    int cashAdvantage,
     bool isAuction,
-    int? runnerUpCash,
   ) {
     TextStyle labelStyle() => TextStyle(
       color: Colors.white70,
@@ -376,7 +377,7 @@ class BoardCenterAction extends StatelessWidget {
                         const SizedBox(width: 5),
                         Flexible(
                           child: Text(
-                            currentIsLeader && runnerUpCash != null
+                            currentIsLeader
                                 ? text.choose('CASH ADVANTAGE', 'নগদে এগিয়ে')
                                 : text.choose('CASH LEADER', 'সর্বোচ্চ নগদ'),
                             maxLines: 1,
@@ -388,10 +389,10 @@ class BoardCenterAction extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      currentIsLeader && runnerUpCash != null
+                      currentIsLeader
                           ? text.choose(
-                              'Ahead of next player',
-                              'পরের খেলোয়াড়ের চেয়ে এগিয়ে',
+                              'CURRENT PLAYER LEADS',
+                              'বর্তমান খেলোয়াড় এগিয়ে',
                             )
                           : leaderName,
                       maxLines: 1,
@@ -405,8 +406,8 @@ class BoardCenterAction extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      currentIsLeader && runnerUpCash != null
-                          ? '+${text.money(leaderCash - runnerUpCash)}'
+                      currentIsLeader
+                          ? '+${text.money(cashAdvantage)}'
                           : text.money(leaderCash),
                       key: const ValueKey<String>('board-leader-cash'),
                       maxLines: 1,

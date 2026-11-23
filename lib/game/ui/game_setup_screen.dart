@@ -2,7 +2,12 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../../core/ui/app_notices.dart';
+
 import '../ai/bot_controller.dart';
+import '../ai/bot_name_pool.dart';
+import '../experience/player_palette.dart';
+import 'widgets/player_color_picker.dart';
 import '../persistence/offline_game_store.dart';
 import 'game_board_screen.dart';
 import 'lan_lobby_screen.dart';
@@ -124,12 +129,14 @@ class _GameSetupScreenState extends State<GameSetupScreen> {
     final configuredNames = vsComputer
         ? <String>[
             localNames.first,
-            for (var i = 1; i < playerCount; i++)
-              '${t.choose('Computer', 'কম্পিউটার')} $i',
+            ...BotNamePool.pick(
+              playerCount - 1,
+              reserved: <String>[localNames.first],
+            ),
           ]
         : localNames;
     if (configuredNames.any((n) => n.isEmpty)) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppNotices.of(context).showSnackBar(
         SnackBar(
           content: Text(
             t.choose(
@@ -369,10 +376,33 @@ class _GameSetupScreenState extends State<GameSetupScreen> {
                         fontFamily: t.font,
                         color: Colors.white70,
                       ),
-                      prefixIcon: Icon(
-                        Icons.circle,
-                        color: tokenColors[i],
-                        size: 22,
+                      prefixIcon: IconButton(
+                        key: ValueKey<String>('select-seat-color-$i'),
+                        tooltip: t.choose(
+                          'Choose player color',
+                          'খেলোয়াড়ের রং বেছে নিন',
+                        ),
+                        onPressed: () async {
+                          await showPlayerColorPicker(
+                            context,
+                            seat: i,
+                            languageCode: widget.languageCode,
+                            activeSeats: vsComputer ? 1 : playerCount,
+                          );
+                          if (mounted) setState(() {});
+                        },
+                        icon: Container(
+                          width: 24,
+                          height: 24,
+                          decoration: BoxDecoration(
+                            color: PlayerColorPreferences.instance.colorFor(i),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.white70,
+                              width: 1.5,
+                            ),
+                          ),
+                        ),
                       ),
                       counterText: '',
                       filled: true,
@@ -431,7 +461,7 @@ class _GameSetupScreenState extends State<GameSetupScreen> {
                 onPressed: () {
                   final name = names.first.text.trim();
                   if (name.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    AppNotices.of(context).showSnackBar(
                       SnackBar(
                         content: Text(
                           t.choose(

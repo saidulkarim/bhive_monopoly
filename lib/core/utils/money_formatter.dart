@@ -1,8 +1,14 @@
+import 'currency_preferences.dart';
+
 /// Presentation only: the integer game balance never changes with language.
 class MoneyFormatter {
   MoneyFormatter._();
 
-  static String format(int amount, {String languageCode = 'en'}) {
+  static String format(
+    int amount, {
+    String languageCode = 'en',
+    String? currencyCode,
+  }) {
     final digits = amount.abs().toString();
     var grouped = digits;
     if (digits.length > 3) {
@@ -24,7 +30,11 @@ class MoneyFormatter {
         (match) => banglaDigits[int.parse(match.group(0)!)],
       );
     }
-    final symbol = bangla ? '৳' : r'$';
+    final symbol =
+        (currencyCode ?? CurrencyPreferences.instance.codeFor(languageCode)) ==
+            'BDT'
+        ? '৳'
+        : r'$';
     return '${amount < 0 ? '-' : ''}$symbol$grouped';
   }
 }

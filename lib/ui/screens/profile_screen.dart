@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import '../../core/ui/app_notices.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -9,6 +11,8 @@ import '../../core/utils/avatar_encoder.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../../providers/app_controller.dart';
 import '../widgets/player_avatar.dart';
+import '../../game/experience/player_palette.dart';
+import '../../game/ui/widgets/player_color_picker.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -86,9 +90,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    AppNotices.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _save() async {
@@ -101,7 +103,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           .saveProfile(_name.text, _preset, _photo);
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppNotices.of(context).showSnackBar(
         SnackBar(content: Text(AppLocalizations.of(context).profileSaved)),
       );
       Navigator.of(context).pop();
@@ -152,6 +154,41 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         textInputAction: TextInputAction.done,
                         decoration: InputDecoration(
                           labelText: l10n.displayName,
+                          prefixIcon: IconButton(
+                            key: const ValueKey<String>('profile-player-color'),
+                            tooltip:
+                                Localizations.localeOf(context).languageCode ==
+                                    'bn'
+                                ? 'আপনার রং নির্বাচন করুন'
+                                : 'Choose your player color',
+                            onPressed: _busy
+                                ? null
+                                : () async {
+                                    await showPlayerColorPicker(
+                                      context,
+                                      seat: 0,
+                                      languageCode: Localizations.localeOf(
+                                        context,
+                                      ).languageCode,
+                                      activeSeats: 1,
+                                    );
+                                    if (mounted) setState(() {});
+                                  },
+                            icon: Container(
+                              width: 25,
+                              height: 25,
+                              decoration: BoxDecoration(
+                                color: PlayerColorPreferences.instance.colorFor(
+                                  0,
+                                ),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 1.5,
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                         validator: (value) {
                           final length = (value ?? '').trim().runes.length;

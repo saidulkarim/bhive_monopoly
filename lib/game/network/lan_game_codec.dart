@@ -12,6 +12,7 @@ class LanGameCodec {
         <String, dynamic>{
           'id': p.id,
           'name': p.name,
+          'colorIndex': p.colorIndex,
           'balance': p.balance,
           'position': p.position,
           'inJail': p.inJail,
@@ -81,6 +82,8 @@ class LanGameCodec {
       if (wire['id'] != i || wire['name'] != p.name) {
         throw const FormatException('Room players changed unexpectedly');
       }
+      final color = wire['colorIndex'];
+      p.colorIndex = color is int && color >= 0 && color < 12 ? color : i;
       p.balance = wire['balance'] as int;
       p.position = wire['position'] as int;
       p.inJail = wire['inJail'] as bool;

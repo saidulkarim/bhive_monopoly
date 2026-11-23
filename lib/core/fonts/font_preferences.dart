@@ -44,8 +44,7 @@ class FontPreferences extends ChangeNotifier {
     // The old app default was Hadi. Migrate it once so existing users also
     // get Karnaphuli after upgrading, without resetting Nikosh choices.
     // Once the marker is stored, explicitly choosing Hadi stays respected.
-    final hasMigrated =
-        preferences.getBool(_karnaphuliMigrationKey) ?? false;
+    final hasMigrated = preferences.getBool(_karnaphuliMigrationKey) ?? false;
     var savedBangla = preferences.getString(_banglaKey);
     if (!hasMigrated) {
       if (savedBangla == 'Hadi') {

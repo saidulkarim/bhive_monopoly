@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../core/ui/app_notices.dart';
+
 import '../../core/fonts/font_catalog.dart';
+import '../../core/utils/currency_preferences.dart';
 import '../../core/fonts/font_preferences.dart';
 import '../../core/theme/app_theme.dart';
 
@@ -39,6 +42,15 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
   @override
   void initState() {
     super.initState();
+    final currencyEn = CurrencyPreferences.instance.codeFor('en') == 'BDT'
+        ? '৳'
+        : r'$';
+    final currencyBn = CurrencyPreferences.instance.codeFor('bn') == 'BDT'
+        ? '৳'
+        : r'$';
+    _enPreview.text = 'Welcome! Start game • Buy property • ${currencyEn}1,500';
+    _bnPreview.text =
+        'স্বাগতম! খেলা শুরু করুন • সম্পত্তি কিনুন • $currencyBn১,৫০০';
     _loadSelections();
   }
 
@@ -69,7 +81,7 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
         englishFamily: _english,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppNotices.of(context).showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFF196F4C),
           content: Text(
@@ -82,7 +94,7 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppNotices.of(context).showSnackBar(
         SnackBar(
           backgroundColor: Colors.red.shade700,
           content: Text(
@@ -103,7 +115,7 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
       _bangla = FontCatalog.defaultBangla;
       _english = FontCatalog.defaultEnglish;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
+    AppNotices.of(context).showSnackBar(
       SnackBar(
         content: Text(
           _text(
@@ -501,7 +513,9 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
       OutlinedButton.icon(
         onPressed: _saving ? null : _resetSelection,
         icon: const Icon(Icons.restart_alt_rounded),
-        label: Text(_text('Restore Karnaphuli / Exo2', 'Karnaphuli / Exo2 ফিরিয়ে আনুন')),
+        label: Text(
+          _text('Restore Karnaphuli / Exo2', 'Karnaphuli / Exo2 ফিরিয়ে আনুন'),
+        ),
       ),
     ],
   );

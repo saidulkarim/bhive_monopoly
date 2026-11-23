@@ -2,14 +2,14 @@
 
 **A bilingual, responsive property-trading board game built with Flutter and Dart for Android and the Web.**
 
-> **Project state:** Development build — **Phase 12.6** (building overlays, cash HUD clarity, and full-screen exit).  
+> **Project state:** Active development — **Phase 13.12** (personalization, animated dice and position glows, top-layer notifications, and test/lifecycle fixes).  
 > **Flutter package:** `monopoly` · **Android application ID:** `com.bhive.monopoly`  
 > **Current `pubspec.yaml` version:** `1.0.0+1` · **Dart constraint:** `^3.11.0`  
 > **Documentation updated:** 23 November 2026
 
 bHiVE Monopoly brings a classic 40-square property-trading experience to phones, tablets, and browsers. Players buy and develop properties, collect rent, participate in auctions, trade with one another, manage mortgages, and try to become the last solvent player. The application combines local Pass & Play, computer opponents, and multiplayer over a local Wi-Fi network with a premium dark, gold, and emerald visual theme.
 
-The project has progressed through incremental releases from the first playable game to **Phase 12.6**. The README documents features and code included in those development packages, known limitations, setup requirements, and verification steps. **It is not a claim that every feature has passed production-level device or cross-platform testing.**
+The project has progressed through iterative development up to **Phase 13.12**. This README describes the implementation and intended behavior of the supplied phase packages and their follow-up hotfixes. It also records installation requirements, troubleshooting steps, known limitations, and verification commands. **Phase 13.12 has not been independently built and tested in this documentation environment; do not treat this file as a production-readiness certification.**
 
 ---
 
@@ -46,16 +46,16 @@ The project has progressed through incremental releases from the first playable 
 | **Computer opponents** | Easy, Medium, and Hard AI strategies |
 | **Board** | 40 squares, color groups, stations, utilities, Chance-style **Fortune** and Community-style **City Chest** spaces |
 | **Transactions** | Buying, rent, auctions, trading, property development, mortgages, taxes, and bankruptcy |
-| **Visuals** | Premium dark-gold design, responsive 2D/2.5D board, animated dice, token motion, ownership flags, detailed title deeds |
+| **Visuals** | Dark-gold design, responsive 2D/2.5D board, animated porcelain-style dice, motion effects for all players, ownership flags, detailed deeds |
 | **Full-screen play** | Explore Board screen with pinch-to-zoom, drag-to-pan, 2D/3D toggle, horizontal zoom controls, and an exit button |
-| **Live information** | Current turn, cash balance, cash leader/advantage, latest activity, and up to 70 recent events |
+| **Live information** | Current turn, cash balance, cash leader/advantage, latest activity, and the Match Activity history panel |
 | **Decisions** | Smooth bottom-up purchase, auction, jail, and debt panels; no automatic bids without user action |
-| **Localization** | English and Bangla UI; configurable fonts and localized currency display |
-| **Profiles** | Local player name and avatar preferences; optional profile photo sharing in LAN rooms |
+| **Localization** | English/Bangla UI, configurable fonts, independent USD ($) or BDT (৳) display selection |
+| **Profiles** | Local player name, 12 mutually exclusive player colors, token/avatar preferences, optional LAN photo sharing |
 | **Local storage** | Offline auto-save, manual save, continue/delete saved game, previous-checkpoint recovery, match history |
-| **Game experience** | Sound effects, volume, reduced-motion setting, camera presets, optional vibration |
+| **Game experience** | Seven soft sound effects, volume, reduced motion, camera presets, optional haptics and modernized home navigation |
 | **3D assets** | Five packaged GLB models in a dedicated interactive showroom |
-| **Quality controls** | Game-state validation, LAN snapshot preflight, regression tests, and a Windows release-check script |
+| **Quality controls** | Game-state validation, LAN snapshot preflight, regression tests, notification lifecycle hotfixes, and a Windows release-check script |
 
 ### Project identity
 
@@ -64,7 +64,7 @@ The project has progressed through incremental releases from the first playable 
 - **Android application ID:** `com.bhive.monopoly` (independent of Dart package name)
 - **Primary targets:** Android and Web
 - **Brand style:** Obsidian / dark green, gold highlights, original bHiVE board branding and property names
-- **Current development milestone:** Phase **12.6**; this is **not** the same as the app version `1.0.0+1`.
+- **Current development milestone:** Phase **13.12**; milestone numbers are **not** automatically the same as the `pubspec.yaml` app version (`1.0.0+1` in the supplied baseline).
 
 ---
 
@@ -84,7 +84,7 @@ One human player competes against one to five AI opponents. Difficulty is select
 | **Medium** | More active buying, cash-reserve management, and development |
 | **Hard** | Stronger property and bidding priorities; more strategic use of cash reserves |
 
-The AI uses the same rules engine as human players. Animations do not decide game outcomes.
+The AI uses the same rules engine as human players. Animations do not decide game outcomes. New solo matches choose non-duplicate computer names from a fixed 20-name pool: **Atlas, Nova, Orion, Luna, Jasper, Sage, Ember, Milo, Aria, Felix, Zara, Theo, Iris, Leo, Maya, Finn, Cleo, River, Axel, Skye**. Saved games retain their assigned names.
 
 ### 3. Local Wi-Fi / LAN multiplayer
 
@@ -94,7 +94,7 @@ Host a match on a supported native device and let other players join through the
 
 ## Gameplay and rules
 
-The game uses a **40-position square board**, starting funds of **1,500**, and a **200** payment for passing/landing on the START position when applicable. The game currency is rendered as `$` in English or `৳` in Bangla, while the underlying rules amounts are unchanged.
+The game uses a **40-position square board**, starting funds of **1,500**, and a **200** payment for passing/landing on the START position when applicable. The amount can display as **$1,500** or **৳1,500**, independently of the selected UI language; switching the symbol does **not** convert the underlying game values.
 
 ### Turn sequence
 
@@ -128,7 +128,7 @@ The game uses a **40-position square board**, starting funds of **1,500**, and a
 
 The layout adapts to phone portrait, landscape, tablet, and wide-screen Web use. A top-down **2D** view is the legibility-first default; a **3D** button enables a tilted **2.5D Matrix4 tabletop perspective**. The board renders forty squares around the perimeter and exposes more detail through zoom and property inspection instead of forcing every long name to be fully readable at once on narrow phones.
 
-### Board interaction — through Phase 12.6
+### Board interaction — through Phase 13.12
 
 | Interaction | Behavior |
 | --- | --- |
@@ -143,8 +143,11 @@ The layout adapts to phone portrait, landscape, tablet, and wide-screen Web use.
 | **Property tap** | Opens a detailed title deed with ownership, price, mortgage and rent information |
 | **Decisions** | Rounded bottom sheets slide upward for purchases, auctions, Jail and debt handling |
 | **Full-screen Explore Board** | Includes player cash cards, board interactions, zoom controls, and an exit-full-screen action |
-| **Zoom** | Pinch/drag or horizontal `− / percentage / + / reset / exit` toolbar beneath the board |
+| **Zoom** | Pinch/drag or horizontal `− / percentage / + / reset / exit` toolbar beneath the board; buttons adjust zoom in **10%** steps |
 | **All 40** | Opens a readable list of every board position with its key information |
+| **Player-position glow** | Every non-bankrupt player has a color-coded occupied-tile border, reflective sweep and token halo; shared spaces use multicolor cues |
+| **Dice during rolling** | Two separately animated tumbling dice with 3D-style motion; settled dice have clean, rounded porcelain faces |
+| **Top notifications** | Solid high-contrast banners above sheets and dialogs, with a dismiss button and automatic timeout |
 
 ### Property deed view
 
@@ -157,15 +160,26 @@ The deed interface provides rent tiers, current ownership, costs and mortgage in
 
 ### Full-screen gameplay
 
-Open **Explore Board** from a running match for a larger presentation. The same core dice interaction can be used there. Switch 2D/3D, navigate with pinch/drag, choose properties, review current cash and recent activity, and leave via the toolbar's **Exit full screen** button or the app bar's Back action.
+Open **Explore Board** from a running match for a larger presentation. The same center-dice interaction can be used there. Switch 2D/3D, navigate with pinch/drag, choose properties, review player cash cards and recent activity, and exit via the horizontal toolbar or app-bar Back action. Purchase/auction decisions open in bottom sheets when action is required; in full screen, a **compact app-bar control** can reopen a dismissed pending decision rather than showing a large duplicate action button above the board.
 
-### Animation, accessibility, and 3D distinction
+### Animated dice and glossy player-position effects
 
-- Dice and board tokens use responsive Flutter-rendered animations.
-- The **Reduce Motion** preference shortens or skips enhanced motion without changing game calculations.
-- Five **actual GLB models** are available in the **3D Showroom**.
-- **The live board is not a fully modeled 3D GLB scene.** Its “3D” mode uses optimized 2.5D perspective; board token symbols also use Flutter-rendered visuals.
-- The application aims for readable touch targets and flexible layouts. Very small screens and large system text sizes should still be checked on physical devices.
+- **Dice:** Two Flutter-painted, glossy ivory dice tumble, bounce and briefly reveal multiple faces during a roll. After the roll, they settle into clean rounded faces without the earlier detached-looking top/right white extensions. The **engine/host** determines the result; rendering does not generate a new outcome.
+- **Every player's position:** All active, non-bankrupt players receive a tile highlight based on their selected color. The currently acting player is emphasized; other occupied positions remain identifiable. Animated reflective sweeps and token halos improve visibility when the board is zoomed out.
+- **Shared spaces:** A square occupied by multiple players displays a segmented/multicolored treatment, with separate token indicators.
+- **Movement tracking:** The highlights follow presentation-level visible positions rather than teleporting immediately to the final board index.
+- **Reduced Motion:** Animated pulsing and tumbling are reduced or stopped, leaving static readable markers. Turn this **off** in Game Experience if the expected animation seems absent.
+- **Implementation distinction:** The live board uses Flutter drawing and 2.5D perspective, **not** a fully modeled GLB scene or a physics-based dice simulation. Five actual GLB models remain in the separate 3D Showroom.
+
+### Top-layer game notices (Phases 13.10–13.12)
+
+The app provides solid, high-contrast top notifications for warnings and confirmations. They are inserted in a root overlay layer above game content and modal sheets so the messages are not hidden behind the Android system bar or a purchase/auction dialog. Notices can be dismissed manually and also have a **five-second auto-dismiss timer**. The dismiss button uses semantics for accessibility without relying on a Tooltip requiring an unavailable ancestor Overlay.
+
+The Phase **13.12** follow-up makes timer disposal lifecycle-aware. A widget test that displays a timed notice must dismiss it or dispose the notice overlay before test completion; otherwise Flutter's fake-async test framework reports pending timers. Notification timing and precedence still require Android/Web visual verification.
+
+### Accessibility and rendering limits
+
+Touch targets, text layout, screen-reader labels and reduced-motion behavior have been considered in individual updates. However, very small screens, large system-font scales, 300%+ board zoom, simultaneous notifications and long Bangla strings should still be manually tested on real devices.
 
 ---
 
@@ -173,7 +187,7 @@ Open **Explore Board** from a running match for a larger presentation. The same 
 
 ### Language support
 
-The application provides **English** and **Bangla** interfaces. Localization resources reside in `lib/l10n/` and the selected language influences interface labels and money display. Some underlying game-engine event messages are stored in English; Phase 12.4 formats their **money amounts at display time** without rewriting saved or synchronized game records.
+The application provides **English** and **Bangla** interfaces. Localization resources reside in `lib/l10n/`. Language controls translated labels and numeral shaping; the **currency symbol is separately selectable** from the home settings menu. Some engine-generated activity strings remain English; monetary amounts in those messages are formatted at display time rather than changing saved or LAN records. The bank stock dialog uses **only the chosen language**, for example `Available houses: 32/32` or `অবশিষ্ট বাড়ি: ৩২/৩২`.
 
 ### Font configuration — current default
 
@@ -224,39 +238,47 @@ flutter:
 
 Choose a Bangla and English font independently, preview sample/custom text, save the selection locally, or restore defaults. Your intended current Bangla default is **Karnaphuli → Nikosh fallback**. The `Hadi` family remains available as an alternative. Saved settings are device-local.
 
-### Currency formatting
+### Independent currency choice and money formatting (Phase 13)
 
-| Context | English | Bangla |
+Select **Currency → USD ($)** or **BDT (৳)** from the home-page hamburger menu. The currency setting is independent from the selected English/Bangla UI language:
+
+| UI language | Currency selected | Example starting amount |
 | --- | --- | --- |
-| Starting cash | `$1,500` | `৳১,৫০০` |
-| Property price | `$220` | `৳২২০` |
-| Rent | `$12` | `৳১২` |
-| Larger value (South Asian grouping) | `$12,50,000` | `৳১২,৫০,০০০` |
+| English | USD | `$1,500` |
+| English | BDT | `৳1,500` |
+| বাংলা | USD | `$১,৫০০` |
+| বাংলা | BDT | `৳১,৫০০` |
 
-The `MoneyFormatter` uses South Asian digit grouping and Bangla digits when the language is `bn`. Formatting is **presentation-only**: switching language does not change stored balances, auction values, or rent calculations. Monetary activity logs are formatted for display; die outcomes, turn numbers and property indices stay ordinary numeric values.
+The formatter uses Bangla digits when the locale is Bangla and supports South Asian grouping for larger values. Monetary amounts in property deeds, rent, purchases, auctions, recent events, and input prompts should use the selected display symbol. Dice values, player counts, tile indices and turn numbers are **not** currency amounts.
+
+**Important:** This is a **display preference**, not a real-dollar-to-taka exchange-rate service. Switching from `$` to `৳` does not multiply or otherwise change any balances, rents, bids, taxes, or stored transactions. When a person has not selected a currency preference yet, the historical language-based defaults may apply.
 
 ---
 
 ## Profiles, tokens, and settings
 
-### Profile and avatars
+### Player profile, avatars and color palette
 
-- Set a local display name and avatar through the Profile screen.
-- Choose among **six preset avatar/token styles** and use stored profile photos where the relevant UI supports them.
-- In LAN play, preset choices synchronize through the lobby. Sharing a personal profile photo is **opt-in**; supported images are resized/compressed toward a **64 KiB** transfer limit where possible.
-- Profile photo sharing is not an account login or proof of identity.
+- Set a local display name and avatar in the Profile screen. The color circle beside the name opens a **12-color palette**: **Amber, Sky, Rose, Mint, Lavender, Champagne, Teal, Apricot, Periwinkle, Lime, Orchid, Steel**.
+- During local game setup, **a color cannot be assigned to more than one active seat**. Already-used colors are unavailable, and reserved colors can be reassigned when seats change. The palette choice persists locally.
+- Player colors are reflected in cash cards, token markers, property ownership pennants, and the animated occupied-space highlight. They are serialized into new saved games and synchronized in host-controlled LAN snapshots.
+- Choose among preset avatar/token styles and use stored profile photos where supported. In LAN play, sharing a personal profile photo is **opt-in**; supported images are resized/compressed toward a **64 KiB** transfer limit where possible.
+- **LAN limitation:** The host's authoritative seat/color mapping synchronizes during a match, but independent guest profile color requests are not fully negotiated in the current LAN lobby.
+- Profile photos and preferences are not account logins or proof of identity.
 
 ### Player token settings
 
 The **Player Tokens** screen lets you choose a visual token for each seat and saves the selection on the device. Selected token icons are also used on the property owner pennants. Several tokens can be previewed using the packaged 3D models; the actual board displays optimized Flutter widgets instead of embedding a GLB WebView in every tile.
 
-### Game Experience settings
+### Home page and Game Experience settings
 
-- Sound effects **on/off** and volume slider.
-- **Reduce Motion** option for less animation.
-- Camera choice: top-down, tabletop, or cinematic board presentation.
-- Android vibration/haptic feedback toggle (Web support depends on platform; unsupported environments remain non-vibrating).
-- Settings persist locally between application launches.
+The updated home page keeps the large **Start Game** button and dashboard cards, while secondary navigation lives in a **top-right hamburger menu**: language, currency, font settings, 3D showroom, player tokens, match history, and Game Experience.
+
+- **Sound effects on/off** and volume slider. Phase 13 provides **seven original, gentle chime-style WAV effects** (dice, coin, purchase, build, jail, turn, victory). These are original synthesized sounds, **not Apple/iPhone sound files**.
+- **Reduce Motion** stops or minimizes repeating dice/board effects while preserving actual game rules and positions.
+- Camera choices for top-down, tabletop and cinematic board presentation.
+- Android vibration/haptic feedback toggle (Web support depends on platform).
+- Preferences persist locally between application launches.
 
 ### Bundled audio and GLB models
 
@@ -415,7 +437,8 @@ bhive_monopoly/
 │   │   │   ├── font_preferences.dart
 │   │   │   └── font_app_builder.dart
 │   │   ├── theme/app_theme.dart
-│   │   └── utils/money_formatter.dart
+│   │   ├── ui/app_notices.dart      # Top-layer notification host and timer cleanup
+│   │   └── utils/                 # Money formatting, currency preferences
 │   ├── l10n/                     # app_en.arb, app_bn.arb, generated strings
 │   ├── models/                   # App/profile data
 │   ├── providers/                # Application state
@@ -428,7 +451,7 @@ bhive_monopoly/
 │       ├── validation/game_snapshot_validator.dart
 │       ├── network/              # Host, room, discovery, packets, trading
 │       ├── persistence/          # Offline saves and match history
-│       ├── experience/           # Audio, haptics, cameras, tokens, settings
+│       ├── experience/           # Audio, haptics, cameras, 12-color palette, settings
 │       ├── presentation/         # Final standings data
 │       └── ui/
 │           ├── game_setup_screen.dart
@@ -472,13 +495,13 @@ bhive_monopoly/
 ### 1. Open your existing project
 
 ```powershell
-cd D:\Working\Flutter\bhive_monopoly
+cd F:\SKT_DATA\Personal\Study\Flutter\bhive_monopoly
 flutter --version
 flutter doctor -v
 flutter devices
 ```
 
-**This README assumes the working project already includes Phases 2–12.6.** Historical ZIPs were *incremental patches*, not a replacement for the complete Android/Web Flutter project. Do not unzip old phases on top of the newest code unless specifically fixing an identified file.
+**This README assumes your working project has integrated Phases 2–13.12 in order.** Historical ZIPs were *incremental patches*, not entire Android/Web projects. The Phase 13.10 consolidated source archive is also **not** a complete independent Flutter checkout; retain your real `pubspec.yaml`, Android configuration, fonts, GLB models and assets. Avoid replacing newer corrected files with files from older phases.
 
 ### 2. Verify package identity
 
@@ -571,13 +594,23 @@ flutter run -d chrome --web-browser-debug-port=9222
 
 Close any *separate* Chrome debugging instance already using port 9222 before retrying.
 
-### Run as a Web server (manual browser launch)
+### Run as a Web server (office PC: confirmed working port)
+
+On the office PC used for this project, Windows rejects a TCP listener on port **8080** with error **10013**, although ports **18080**, **3000**, and an automatically chosen port were successfully bound during diagnosis. Run:
 
 ```powershell
-flutter run -d web-server --web-hostname 127.0.0.1 --web-port 8080
+flutter run -d web-server --web-hostname=127.0.0.1 --web-port=18080
 ```
 
-Open `http://127.0.0.1:8080` manually. This avoids Flutter launching Chrome automatically; it does not provide the same browser debugging integration as `-d chrome`.
+Open **http://127.0.0.1:18080** manually in Chrome. This command was reported **working on the office PC**. It avoids Flutter automatically starting a Chrome debugging instance; browser debugging integration can differ from `flutter run -d chrome`.
+
+You can separately try direct Chrome debugging with a fixed application/debugging port, provided those ports are free:
+
+```powershell
+flutter run -d chrome --web-port=18080 --web-browser-debug-port=9222
+```
+
+**Do not remove Windows reserved ports or disable managed office endpoint security to make the app start.**
 
 ### Release build outputs
 
@@ -626,15 +659,20 @@ It uses `assets/icons/app_icon.png` for Android and Web output; iOS icon generat
 ### Fast checks
 
 ```powershell
+flutter pub get
+dart format lib test
 flutter analyze
 flutter test test/game/
-```
-
-The project also includes font-specific tests:
-
-```powershell
 flutter test test/fonts/
 ```
+
+To run the **Phase 13.12 notification timer regression** on its own:
+
+```powershell
+flutter test test/game/phase13_10_clean_dice_top_messages_test.dart
+```
+
+**If you have not installed the corresponding test patches, some test paths listed below may be absent.**
 
 ### Targeted regression checks
 
@@ -659,6 +697,13 @@ flutter test test/game/phase12_5_cash_activity_auction_ux_test.dart
 flutter test test/game/phase12_5_board_center_overflow_test.dart
 flutter test test/game/phase12_6_board_house_cash_exit_test.dart
 
+# Phase 13 user experience, animated dice, glow, notices
+flutter test test/game/phase13_player_color_currency_bot_dice_test.dart
+flutter test test/game/phase13_3_modern_dice_test.dart
+flutter test test/game/phase13_4_current_position_glow_test.dart
+flutter test test/game/phase13_5_all_players_glow_rolling_dice_test.dart
+flutter test test/game/phase13_10_clean_dice_top_messages_test.dart
+
 # Game-state and save integrity
 flutter test test/game/phase12_snapshot_integrity_test.dart
 flutter test test/game/phase12_save_recovery_test.dart
@@ -678,17 +723,20 @@ Some test files were delivered in separate incremental ZIPs. If an individual fi
 | Buildings | Buying a house/hotel adds a compact badge without `BOTTOM OVERFLOWED` warnings |
 | Current cash | Updates after purchase, rent, bidding, building and mortgage changes |
 | Ownership pennants | Correct owner color, player token symbol and inward direction on every board side |
-| Currency | `$`/`৳` appears on monetary UI and activity; dice/turn numbers are not corrupted |
+| Currency | Independent USD/BDT selection works in both languages; messages and amounts use the chosen symbol, not exchange-rate conversion |
 | Font settings | Karnaphuli default; alternate Hadi/Nikosh choices persist after restart |
 | AI | Easy/Medium/Hard turns and auctions complete correctly |
 | Save/resume | Exact state restored; backup recovery tests pass |
 | LAN, 2+ devices | Same dice, position, property owners, money and turn phase across devices |
 | Disconnect/reconnect | Guest returns to same identity without duplicate game actions |
 | History & achievements | Completed offline/LAN match results recorded according to device receipt |
-| Reduce Motion | Animation reduction does not alter dice results or engine state |
+| Player positions | All active players have legible color-specific glow; two players on one tile remain distinguishable |
+| Dice | Both dice tumble on roll, settle cleanly without stray top/right strips, and match engine output |
+| Notices | Warning banners stay above open sheets, wrap at 320px, can be dismissed, and do not leave pending timers in widget tests |
+| Reduce Motion | Animation reduction leaves static indicators and does not alter dice results or engine state |
 | Showroom | All five GLB assets load and rotate on the supported runtime |
 
-**Testing status:** The user has previously reported passing Flutter tests for some phases and has supplied later failures that were addressed with targeted hotfixes. The complete final **Phase 12.6** checkout has **not** been independently compiled and tested in this documentation environment. Run the checks above before publishing or tagging a stable release.
+**Testing status (23 November 2026):** Flutter test output from the office PC has been used to correct several regressions in the explorer navigation, a duplicate "River Walk" finder, and continuously repeating animation tests. Phase 13.10–13.12 addressed a top-message Tooltip/Overlay assertion, a secondary Row overflow, and a **five-second pending Timer** in the narrow-screen widget test. **The user has not yet reported a final passing test run after applying Phase 13.12.** The documentation environment cannot run Flutter/Dart; verify `flutter analyze` and the complete game test suite locally before release.
 
 ---
 
@@ -702,15 +750,39 @@ The actual package name is **`monopoly`**. Use `package:monopoly/...` in source 
 
 Check that the file exists and `assets/models/` is under the existing `flutter: assets:` list. Then run `flutter clean`, `flutter pub get`, and the Phase 8 model-assets test. Avoid duplicate YAML asset sections.
 
-### Chrome fails to launch after three tries
+### Chrome fails to launch / `SocketException errno = 10013` on port 8080
 
-Check `flutter doctor -v`, your Chrome installation, antivirus/firewall policies, and local debugging port access. If Chrome remote debugging works manually but Flutter still fails, use:
+On the office PC, `flutter run -d chrome` initially failed to launch, and `flutter run -d web-server --web-port=8080` failed to bind `127.0.0.1:8080`. A direct PowerShell TCP-listener test verified that **8080 was blocked** while **18080, 3000, and an automatically assigned port were available**. The IPv4 exclusion list did not list 8080, so the exact port-specific security/ownership cause was not conclusively established.
+
+**Known-good office command:**
 
 ```powershell
-flutter run -d web-server --web-port 8080
+flutter run -d web-server --web-hostname=127.0.0.1 --web-port=18080
 ```
 
-Then browse to `http://localhost:8080`. Alternatively try `flutter run -d edge` if the device is available. Installing newer package versions is not itself a fix for a Chrome launch problem.
+Open `http://127.0.0.1:18080` in Chrome. If direct Chrome debugging is still desired, inspect the local browser debugging policy and firewall/endpoint protection rules with office IT; try `--web-port=18080 --web-browser-debug-port=9222` only when both ports are available. Do not change system-wide port exclusions without authorization.
+
+### `pumpAndSettle` times out with continuously animated highlights
+
+Phase 13.5 introduced repeating glossy position effects and token animations. Flutter's `pumpAndSettle()` may wait indefinitely for a frame-scheduled animation. In navigation widget tests, use **bounded `pump()` calls** and assert that the desired route or dialog is gone, rather than waiting for every animation in the app to stop. If the route does not disappear after bounded frames, inspect the actual Navigator callback; simply increasing the timeout is not a gameplay fix.
+
+### Board explorer property finder matches twice
+
+A property name such as `River Walk` appears both on the board and in the **All 40** list. `find.text('River Walk')` can match two widgets. Restrict the finder to the list row when testing list selection, for example `find.widgetWithText(ListTile, 'River Walk')`.
+
+### `No Overlay widget found` while displaying a top notification
+
+The top notification lives above the page Navigator, and the dismiss `IconButton` must not create a `Tooltip` that expects its own ancestor Overlay. Phase 13.11 removes that tooltip, retains `Semantics` for the accessible name, and fixes row wrapping. Do not revert to the old version of `lib/core/ui/app_notices.dart`.
+
+### `A Timer is still pending even after the widget tree was disposed`
+
+Top notices have a five-second dismiss timer. Phase 13.12 cancels this timer when the notice overlay is disposed and updates the narrow-width widget test to dismiss the notice explicitly. Run:
+
+```powershell
+flutter test test/game/phase13_10_clean_dice_top_messages_test.dart
+```
+
+If this still fails, confirm **both** the Phase 13.12 `app_notices.dart` and its matching test file were copied into your project; avoid mixing them with Phase 13.10/13.11 versions.
 
 ### RenderFlex overflow in the center board
 
@@ -766,7 +838,20 @@ This can occur after mixing files from different phases. Verify that `AdaptiveBo
 | **Phase 12.3** | Horizontal zoom toolbar; owner-colored token-icon triangular pennants |
 | **Phase 12.4** | Currency symbols in recent events, activity, transactions and logs |
 | **Phase 12.5** | Latest event below dice, cash leader/current cash HUD, auto-open decisions; overflow hotfix |
-| **Phase 12.6** | Compact building overlays, accurate cash advantage display, full-screen exit control |
+| **Phase 12.6** | Compact building overlays, cash-advantage display, full-screen exit control |
+| **Phase 13** | Redesigned home/hamburger navigation; 12 exclusive seat colors; 20 random AI names; language-independent USD/BDT preference; 10% zoom; new audio, language-specific bank counts and 3D-style dice |
+| **Phase 13.1** | Targeted fixes for 20 analyzer diagnostics (deprecated APIs, protected notifier usage, braces, imports, doc comments) |
+| **Phase 13.2** | Removed redundant full-screen REVIEW DECISION/OPEN BID bars; pending decisions remain reopenable from a compact app-bar action |
+| **Phase 13.3** | Porcelain dice styling: rounded ivory faces, dark pips and less exaggerated edges |
+| **Phase 13.4** | Initial active-player position glow and glossy reflective sweep |
+| **Phase 13.5** | Tumbling 3D-style dice and color-coded glossy occupied-tile highlights for **all** players, including shared squares |
+| **Phase 13.6** | Cash-advantage regression correction and bounded-frame tests for continuous animation screens |
+| **Phase 13.7** | Full-screen explorer exit navigation and test timing fix |
+| **Phase 13.8** | Disambiguated River Walk list entry from the board's matching text in widget tests |
+| **Phase 13.9** | Bounded explorer route-dismissal wait in navigation test |
+| **Phase 13.10** | Clean settled dice rendering, stronger glossy effects, and a root-level high-contrast notification overlay |
+| **Phase 13.11** | Fixed notification dismiss tooltip's missing Overlay assertion and narrow-screen Row overflow |
+| **Phase 13.12** | Lifecycle-safe five-second notification timer cancellation and narrow-screen timer regression test |
 
 **Integration rule:** Later patches build on earlier ones. Avoid overwriting a newer implementation with a file extracted from an older phase. Use Git to compare incremental updates.
 
@@ -782,13 +867,18 @@ This can occur after mixing files from different phases. Verify that `AdaptiveBo
 - **Web hosting:** Web clients join LAN hosts; browsers do not host the native LAN server. HTTPS/WSS interoperability needs separate design.
 - **Persistence:** Offline saves and history are local to the device/browser and are lost when corresponding app data is deleted. Active LAN sessions do not have the same offline resume feature.
 - **History:** Guests that miss the final state cannot reliably record a completed LAN match.
-- **Localization:** Some engine-produced activity text remains English even though money amounts and many UI labels are localized.
-- **Small displays:** Forty property tiles remain inherently dense on small phones; use zoom and the All 40 list for full details.
+- **Localization:** Some engine-produced activity text remains English even though monetary amounts, the bank inventory dialog and many labels are localized. Currency selection is a display choice, not an exchange conversion.
+- **Small displays:** Forty property tiles remain inherently dense on small phones; use zoom and the All 40 list for full details. Large zoom levels may crop the board until the view is panned or reset.
+- **LAN player colors:** The host syncs a match color map; independent guest profile color selection is not negotiated during the LAN lobby.
+- **Animations and accessibility:** Continuous effects can increase GPU/CPU work and complicate unbounded widget-test settling; use Reduced Motion where needed.
+- **Notification test status:** Phase 13.12 timer-lifecycle fix is provided, but a final all-green full-suite result has not yet been supplied.
 
 ### Suggested future work
 
 - Benchmarked, optional **GLB board tokens** with performance fallbacks.
-- Further refinements for Bangla layout, long translated labels and large text-scale accessibility.
+- Further refinements for Bangla layout, long translated labels, consistent activity translation and large text-scale accessibility.
+- UI performance profiling for 2D/3D dice, animated multi-player glow and notifications on lower-end Android devices.
+- LAN lobby color preference negotiation for joining players without invalidating the host-authoritative seat palette.
 - Full keyboard, screen-reader and semantic action audit.
 - Expanded game-state fuzz testing and multi-device LAN recovery tests.
 - Transaction replay/desync diagnostics and more comprehensive network resilience testing.
@@ -819,7 +909,7 @@ The project is under active development. For changes, use a feature branch or co
 ```powershell
 git status
 git add .
-git commit -m "Document bHiVE Monopoly through Phase 12.6"
+git commit -m "docs: update bHiVE Monopoly README through Phase 13.12"
 ```
 
 **License:** No repository-wide source license has been specified in the provided project materials. Do not assume the code or bundled assets are open-source or redistributable until an explicit license and asset provenance are added.
@@ -827,4 +917,4 @@ git commit -m "Document bHiVE Monopoly through Phase 12.6"
 ---
 
 **bHiVE Monopoly** · Flutter / Dart · Android + Web · English + বাংলা  
-*Documentation baseline: Phase 12.6 · 23 November 2026*
+*Documentation baseline: Phase 13.12 · 23 November 2026*

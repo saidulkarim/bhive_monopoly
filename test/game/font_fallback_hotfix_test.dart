@@ -10,7 +10,10 @@ void main() {
     expect(FontCatalog.fallbacks('bn', 'Nikosh'), <String>['Karnaphuli']);
     expect(FontCatalog.fallbacks('en', 'Exo2'), isEmpty);
     expect(FontCatalog.fallbacks('en', 'Roboto'), <String>['Exo2']);
-    expect(FontCatalog.fallbacks('bn', 'Karnaphuli').contains('Karnaphuli'), isFalse);
+    expect(
+      FontCatalog.fallbacks('bn', 'Karnaphuli').contains('Karnaphuli'),
+      isFalse,
+    );
   });
 
   test('GameText respects the selected font fallback', () {

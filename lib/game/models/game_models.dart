@@ -55,10 +55,12 @@ class BoardSpace {
 }
 
 class PlayerState {
-  PlayerState({required this.id, required this.name});
+  PlayerState({required this.id, required this.name, int? colorIndex})
+    : colorIndex = colorIndex ?? id;
 
   final int id;
   final String name;
+  int colorIndex;
   int balance = 1500;
   int position = 0;
   bool inJail = false;

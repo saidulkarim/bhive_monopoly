@@ -1,5 +1,3 @@
-// ignore_for_file: deprecated_member_use
-
 import 'package:flutter/material.dart';
 
 import '../engine/game_engine.dart';
@@ -106,8 +104,8 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen> {
     // Match the actual square GameBoardView, not the taller phone viewport.
     final distance = (1 - next) * _boardSide / 2;
     _transform.value = Matrix4.identity()
-      ..translate(distance, distance)
-      ..scale(next);
+      ..translateByDouble(distance, distance, 0.0, 1.0)
+      ..scaleByDouble(next, next, 1.0, 1.0);
   }
 
   @override
@@ -125,6 +123,35 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen> {
         foregroundColor: kBoardGold,
         title: Text(t.choose('Explore Board', 'বোর্ড দেখুন'), style: textStyle),
         actions: [
+          // Decision sheets open automatically. Keep only a compact way to
+          // reopen a dismissed purchase/auction/jail/debt sheet, instead of
+          // the full-width banner that covered the top of the board.
+          if (widget.onReviewDecision != null &&
+              (widget.decisionEnabled?.call() ?? false) &&
+              (currentGame.phase == TurnPhase.purchase ||
+                  currentGame.phase == TurnPhase.auction ||
+                  currentGame.phase == TurnPhase.jailDecision ||
+                  currentGame.phase == TurnPhase.debt))
+            IconButton(
+              key: const ValueKey<String>('explorer-pending-decision-action'),
+              tooltip: currentGame.phase == TurnPhase.auction
+                  ? t.choose('Open bidding', 'দর দেওয়ার প্যানেল খুলুন')
+                  : t.choose(
+                      'Open pending action',
+                      'সিদ্ধান্তের প্যানেল খুলুন',
+                    ),
+              onPressed: widget.onReviewDecision,
+              icon: Badge(
+                smallSize: 8,
+                backgroundColor: kBoardGold,
+                child: Icon(
+                  currentGame.phase == TurnPhase.auction
+                      ? Icons.gavel_rounded
+                      : Icons.notifications_active_outlined,
+                  color: kBoardGold,
+                ),
+              ),
+            ),
           IconButton(
             tooltip: t.choose('Tile list', 'ঘরের তালিকা'),
             icon: Icon(
@@ -181,44 +208,6 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen> {
                 ),
               ),
             ),
-            if (widget.onReviewDecision != null &&
-                (widget.decisionEnabled?.call() ?? false))
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 4,
-                ),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 44,
-                  child: FilledButton.icon(
-                    key: const ValueKey<String>('explorer-review-decision'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: kBoardGold,
-                      foregroundColor: kBoardDark,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    onPressed: widget.onReviewDecision,
-                    icon: Icon(
-                      currentGame.phase == TurnPhase.auction
-                          ? Icons.gavel_rounded
-                          : Icons.keyboard_arrow_up_rounded,
-                    ),
-                    label: Text(
-                      currentGame.phase == TurnPhase.auction
-                          ? t.choose('OPEN BID', 'দর দিন')
-                          : t.choose('REVIEW DECISION', 'সিদ্ধান্ত দেখুন'),
-                      style: TextStyle(
-                        fontFamily: t.font,
-                        fontFamilyFallback: t.fallbackFonts,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
             Expanded(
               child: _showList
                   ? _tileList()
@@ -245,8 +234,9 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen> {
                           onEndTurn: widget.onEndTurn,
                           canAct: widget.canAct,
                           actionEnabled: widget.actionEnabled,
-                          onReviewDecision: widget.onReviewDecision,
-                          decisionEnabled: widget.decisionEnabled,
+                          // The app-bar action is the one compact manual
+                          // fallback. Avoid duplicating REVIEW OPTIONS inside
+                          // the board center while the sheet is already open.
                           onViewActivity: widget.onViewActivity,
                         );
                       },
@@ -284,7 +274,7 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen> {
         decoration: BoxDecoration(
           color: const Color(0xFF1A3031),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: kBoardGold.withOpacity(.45)),
+          border: Border.all(color: kBoardGold.withValues(alpha: .45)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -294,7 +284,7 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen> {
               constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
               icon: const Icon(Icons.remove, color: kBoardGold),
               onPressed: () =>
-                  _setZoom(_transform.value.getMaxScaleOnAxis() - .5),
+                  _setZoom(_transform.value.getMaxScaleOnAxis() - .1),
             ),
             SizedBox(
               width: 62,
@@ -318,7 +308,7 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen> {
               constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
               icon: const Icon(Icons.add, color: kBoardGold),
               onPressed: () =>
-                  _setZoom(_transform.value.getMaxScaleOnAxis() + .5),
+                  _setZoom(_transform.value.getMaxScaleOnAxis() + .1),
             ),
             IconButton(
               tooltip: t.choose('Reset zoom', 'জুম আগের অবস্থায়'),
@@ -336,7 +326,7 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen> {
                 Icons.fullscreen_exit_rounded,
                 color: kBoardGold,
               ),
-              onPressed: () => Navigator.of(context).maybePop(),
+              onPressed: () => Navigator.of(context).pop(),
             ),
           ],
         ),
