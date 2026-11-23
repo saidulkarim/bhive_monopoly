@@ -24,6 +24,24 @@ class GameText {
   String money(int value) =>
       MoneyFormatter.format(value, languageCode: languageCode);
 
+  /// A turn announcement is already represented by the turn/player HUD.
+  /// Keep the latest-activity panel for actual events (rolls, purchases,
+  /// rent, auctions, building, etc.). Logs are newest-first in GameEngine.
+  /// Skips both straight and curly apostrophes from saved/remote games.
+  static String? latestMeaningfulActivity(Iterable<String> events) {
+    for (final event in events) {
+      final value = event.trim();
+      if (value.isEmpty || _turnOnlyMessage.hasMatch(value)) continue;
+      return value;
+    }
+    return null;
+  }
+
+  static final RegExp _turnOnlyMessage = RegExp(
+    r"^.+['’]s\s+turn[.!]?\s*$",
+    caseSensitive: false,
+  );
+
   /// Localize amounts in existing GameEngine activity/error strings.
   ///
   /// Engine logs are stored and sent over LAN as plain, stable text. We only

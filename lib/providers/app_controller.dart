@@ -11,7 +11,10 @@ final appControllerProvider = AsyncNotifierProvider<AppController, AppState>(
 
 class AppController extends AsyncNotifier<AppState> {
   static const storageKey = 'bhive.monopoly.profile.v1';
-  final _preferences = SharedPreferencesAsync();
+  // Initialize storage only when it is actually needed. This allows test
+  // AsyncNotifier subclasses that override build() to supply in-memory
+  // state without constructing a native-platform preferences client.
+  late final SharedPreferencesAsync _preferences = SharedPreferencesAsync();
 
   @override
   Future<AppState> build() async {

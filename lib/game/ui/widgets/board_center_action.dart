@@ -64,7 +64,7 @@ class BoardCenterAction extends StatelessWidget {
         : opponents.map((p) => p.balance).reduce((a, b) => a >= b ? a : b);
     final currentIsCashLeader = current.balance >= leader.balance;
     final cashAdvantage = current.balance - highestOtherCash;
-    final latestEvent = engine.log.isEmpty ? null : engine.log.first;
+    final latestEvent = GameText.latestMeaningfulActivity(engine.log);
     final isAction = rolling || phase == TurnPhase.complete;
 
     String status() {
@@ -207,54 +207,69 @@ class BoardCenterAction extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 15),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 180),
-                child: Text(
-                  status(),
-                  key: ValueKey<TurnPhase>(phase),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontFamily: text.font,
-                    fontFamilyFallback: text.fallbackFonts,
-                    fontSize: 19,
-                    fontWeight: FontWeight.w700,
-                    color: (isAction && canAct) ? _gold : Colors.white70,
-                  ),
-                ),
-              ),
-              if (latestEvent != null) ...<Widget>[
-                const SizedBox(height: 16),
-                _latestActivity(latestEvent),
-              ],
+              // During an actionable phase, the status IS the reopen
+              // control. No redundant banner and no hunt for the bell icon.
               if (canReviewDecision &&
                   onReviewDecision != null &&
-                  phase != TurnPhase.roll &&
-                  phase != TurnPhase.complete &&
-                  phase != TurnPhase.gameOver) ...<Widget>[
-                const SizedBox(height: 14),
+                  (phase == TurnPhase.purchase ||
+                      phase == TurnPhase.auction ||
+                      phase == TurnPhase.jailDecision ||
+                      phase == TurnPhase.debt))
                 SizedBox(
+                  width: 345,
                   height: 56,
                   child: OutlinedButton.icon(
+                    key: const ValueKey<String>(
+                      'board-pending-decision-button',
+                    ),
                     onPressed: onReviewDecision,
-                    icon: const Icon(Icons.keyboard_arrow_up_rounded),
+                    icon: Icon(
+                      phase == TurnPhase.auction
+                          ? Icons.gavel_rounded
+                          : phase == TurnPhase.purchase
+                          ? Icons.shopping_cart_checkout_rounded
+                          : Icons.touch_app_rounded,
+                    ),
                     label: Text(
-                      text.choose('REVIEW OPTIONS', 'সিদ্ধান্তের বিকল্প দেখুন'),
+                      status(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontFamily: text.font,
                         fontFamilyFallback: text.fallbackFonts,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 19,
                       ),
                     ),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: _gold,
+                      backgroundColor: const Color(0xFF23433C),
                       side: const BorderSide(color: _gold, width: 2),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(13),
                       ),
                     ),
                   ),
+                )
+              else
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  child: Text(
+                    status(),
+                    key: ValueKey<TurnPhase>(phase),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontFamily: text.font,
+                      fontFamilyFallback: text.fallbackFonts,
+                      fontSize: 19,
+                      fontWeight: FontWeight.w700,
+                      color: (isAction && canAct) ? _gold : Colors.white70,
+                    ),
+                  ),
                 ),
+              if (latestEvent != null) ...<Widget>[
+                const SizedBox(height: 16),
+                _latestActivity(latestEvent),
               ],
               if (canFinish) ...<Widget>[
                 const SizedBox(height: 16),

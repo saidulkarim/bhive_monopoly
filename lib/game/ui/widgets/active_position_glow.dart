@@ -127,6 +127,19 @@ class _PositionGlowPainter extends CustomPainter {
     if (rect.width == 0 || rect.height == 0) return;
     final frame = RRect.fromRectAndRadius(rect, const Radius.circular(7));
 
+    // A stronger active-turn aura is visible even after the 1000px board is
+    // scaled onto a small phone. Other players keep their quieter colors.
+    if (isCurrentTurn) {
+      canvas.drawRRect(
+        frame.inflate(1),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 9
+          ..color = primary.withValues(alpha: .33 + .34 * pulse)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9),
+      );
+    }
+
     // Soft interior colour wash. Draw over the tile *after* its text: it stays
     // visible on dark group stripes as well as special squares.
     canvas.drawRRect(

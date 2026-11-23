@@ -7,6 +7,8 @@ import '../../core/ui/app_notices.dart';
 import 'package:flutter/services.dart';
 
 import '../network/lan_room_controller.dart';
+import '../network/relay_protocol.dart';
+import '../network/bluetooth_game_bridge.dart';
 import '../network/lan_discovery.dart';
 import '../network/lan_avatar_codec.dart';
 import '../network/lan_avatar_compressor.dart';
@@ -17,7 +19,7 @@ import 'lan_board_screen.dart';
 import 'widgets/game_board_view.dart';
 import '../experience/player_palette.dart';
 
-/// Same-router Wi-Fi room. Android/desktop hosts; Android/Web may join by IP.
+/// Local Wi-Fi or server-relayed room; both Android and Web may host.
 class LanLobbyScreen extends StatefulWidget {
   const LanLobbyScreen({
     super.key,
@@ -43,7 +45,16 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
   );
   final TextEditingController _ip = TextEditingController();
   final TextEditingController _pin = TextEditingController();
-  bool _hostMode = !kIsWeb;
+  final TextEditingController _bluetoothAddress = TextEditingController();
+  List<BluetoothGameDevice> _pairedBluetoothDevices =
+      const <BluetoothGameDevice>[];
+  bool _loadingBluetoothDevices = false;
+  late final TextEditingController _relayUrl = TextEditingController(
+    text: _defaultRelayUrl(),
+  );
+  bool _onlineMode = kIsWeb;
+  bool _bluetoothMode = false;
+  bool _hostMode = true;
   bool _loading = false;
   bool _handedOff = false;
   int _maxPlayers = 4;
@@ -52,6 +63,53 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
   final LanDiscoveryService _discovery = LanDiscoveryService();
   int _avatarIndex = 0;
   bool _sharePhoto = false;
+
+  static String _defaultRelayUrl() {
+    if (!kIsWeb) return '';
+    final origin = Uri.base;
+    if (origin.host == 'localhost' || origin.host == '127.0.0.1') {
+      return 'ws://${origin.host}:5057/ws';
+    }
+    final protocol = origin.scheme == 'https' ? 'wss' : 'ws';
+    return '$protocol://${origin.authority}/bhive-relay/ws';
+  }
+
+  void _changeNetworkMode(bool online) {
+    if (_onlineMode == online && !_bluetoothMode) return;
+    unawaited(_discovery.stopBrowsing());
+    setState(() {
+      _onlineMode = online;
+      _bluetoothMode = false;
+      _hostMode = online || !kIsWeb;
+      _pin.clear();
+    });
+  }
+
+  void _changeBluetoothMode() {
+    if (_bluetoothMode) return;
+    unawaited(_discovery.stopBrowsing());
+    setState(() {
+      _onlineMode = false;
+      _bluetoothMode = true;
+      _hostMode = true;
+      _pin.clear();
+    });
+    unawaited(_refreshBluetoothDevices());
+  }
+
+  Future<void> _refreshBluetoothDevices() async {
+    if (!BluetoothGameBridge.isSupported || _loadingBluetoothDevices) return;
+    setState(() => _loadingBluetoothDevices = true);
+    try {
+      final devices = await BluetoothGameBridge.instance.pairedDevices();
+      if (!mounted) return;
+      setState(() => _pairedBluetoothDevices = devices);
+    } catch (error) {
+      if (mounted) _showError(error.toString());
+    } finally {
+      if (mounted) setState(() => _loadingBluetoothDevices = false);
+    }
+  }
 
   @override
   void initState() {
@@ -69,7 +127,7 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
 
   void _changeMode(bool hosting) {
     setState(() => _hostMode = hosting);
-    if (hosting) {
+    if (hosting || _onlineMode || _bluetoothMode) {
       unawaited(_discovery.stopBrowsing());
     } else if (!kIsWeb) {
       unawaited(
@@ -88,6 +146,8 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
     _name.dispose();
     _ip.dispose();
     _pin.dispose();
+    _bluetoothAddress.dispose();
+    _relayUrl.dispose();
     super.dispose();
   }
 
@@ -137,12 +197,30 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
     setState(() => _loading = true);
     try {
       final photo = await _lanPhoto();
-      final room = await LanRoomController.host(
-        name: _name.text,
-        maxPlayers: _maxPlayers,
-        avatarIndex: _avatarIndex,
-        avatarBytes: photo,
-      );
+      final room = _bluetoothMode
+          ? await LanRoomController.hostBluetooth(
+              name: _name.text,
+              maxPlayers: _maxPlayers,
+              avatarIndex: _avatarIndex,
+              avatarBytes: photo,
+            )
+          : _onlineMode
+          ? await LanRoomController.hostViaRelay(
+              name: _name.text,
+              endpoint: RelayProtocol.endpoint(
+                _relayUrl.text,
+                requireSecure: kIsWeb && Uri.base.scheme == 'https',
+              ),
+              maxPlayers: _maxPlayers,
+              avatarIndex: _avatarIndex,
+              avatarBytes: photo,
+            )
+          : await LanRoomController.host(
+              name: _name.text,
+              maxPlayers: _maxPlayers,
+              avatarIndex: _avatarIndex,
+              avatarBytes: photo,
+            );
       if (!mounted) {
         await room.shutdown();
         return;
@@ -161,21 +239,45 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
     setState(() => _loading = true);
     try {
       final photo = await _lanPhoto();
-      final ipText = _ip.text.trim();
-      final host = ipText.contains(':') ? ipText.split(':').first : ipText;
-      final portText = ipText.contains(':') ? ipText.split(':').last : '';
-      final port = portText.isEmpty
-          ? LanRoomController.defaultPort
-          : int.parse(portText);
-      if (port < 1 || port > 65535) throw const FormatException('Invalid port');
-      final room = await LanRoomController.join(
-        name: _name.text,
-        hostIp: host,
-        pin: _pin.text,
-        port: port,
-        avatarIndex: _avatarIndex,
-        avatarBytes: photo,
-      );
+      late final LanRoomController room;
+      if (_bluetoothMode) {
+        room = await LanRoomController.joinBluetooth(
+          name: _name.text,
+          deviceAddress: _bluetoothAddress.text.trim(),
+          pin: _pin.text.trim(),
+          avatarIndex: _avatarIndex,
+          avatarBytes: photo,
+        );
+      } else if (_onlineMode) {
+        room = await LanRoomController.joinRelay(
+          name: _name.text,
+          endpoint: RelayProtocol.endpoint(
+            _relayUrl.text,
+            requireSecure: kIsWeb && Uri.base.scheme == 'https',
+          ),
+          roomCode: _pin.text,
+          avatarIndex: _avatarIndex,
+          avatarBytes: photo,
+        );
+      } else {
+        final ipText = _ip.text.trim();
+        final host = ipText.contains(':') ? ipText.split(':').first : ipText;
+        final portText = ipText.contains(':') ? ipText.split(':').last : '';
+        final port = portText.isEmpty
+            ? LanRoomController.defaultPort
+            : int.parse(portText);
+        if (port < 1 || port > 65535) {
+          throw const FormatException('Invalid port');
+        }
+        room = await LanRoomController.join(
+          name: _name.text,
+          hostIp: host,
+          pin: _pin.text,
+          port: port,
+          avatarIndex: _avatarIndex,
+          avatarBytes: photo,
+        );
+      }
       if (!mounted) {
         await room.shutdown();
         return;
@@ -236,7 +338,7 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
       backgroundColor: kBoardDark,
       foregroundColor: kBoardGold,
       title: Text(
-        t.choose('LAN Multiplayer', 'ওয়াই-ফাই মাল্টিপ্লেয়ার'),
+        t.choose('Multiplayer', 'মাল্টিপ্লেয়ার'),
         style: TextStyle(fontFamily: t.font),
       ),
     ),
@@ -247,8 +349,10 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
           child: ListView(
             padding: const EdgeInsets.all(18),
             children: [
-              const Icon(
-                Icons.wifi_tethering_rounded,
+              Icon(
+                _bluetoothMode
+                    ? Icons.bluetooth_rounded
+                    : Icons.wifi_tethering_rounded,
                 color: kBoardGold,
                 size: 65,
               ),
@@ -265,10 +369,20 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
               ),
               const SizedBox(height: 7),
               Text(
-                t.choose(
-                  'Play together on the same Wi-Fi or hotspot.',
-                  'একই ওয়াই-ফাই বা হটস্পটে একসঙ্গে খেলুন।',
-                ),
+                _bluetoothMode
+                    ? t.choose(
+                        'Play Android-to-Android over Bluetooth, with no internet.',
+                        'ইন্টারনেট ছাড়াই অ্যান্ড্রয়েড ফোনে ব্লুটুথের মাধ্যমে খেলুন।',
+                      )
+                    : _onlineMode
+                    ? t.choose(
+                        'Create or join a room from Web and Android.',
+                        'ওয়েব ও অ্যান্ড্রয়েড থেকে রুম তৈরি বা যোগ দিন।',
+                      )
+                    : t.choose(
+                        'Play together on the same Wi-Fi or hotspot.',
+                        'একই ওয়াই-ফাই বা হটস্পটে একসঙ্গে খেলুন।',
+                      ),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.white70, fontFamily: t.font),
               ),
@@ -276,13 +390,29 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
               if (_room == null) _createJoinPanel() else _waitingPanel(_room!),
               const SizedBox(height: 18),
               Text(
-                t.choose(
-                  'The Android/desktop host must remain open. Guests can join from '
-                      'Android or Web. Use the host device’s Wi-Fi IPv4 address; '
-                      'local network only (no public Internet server).',
-                  'অ্যান্ড্রয়েড/ডেস্কটপ হোস্ট চালু রাখুন। অ্যান্ড্রয়েড বা ওয়েব '
-                      'থেকে যোগ দিন। হোস্ট ডিভাইসের ওয়াই-ফাই IPv4 ঠিকানা ব্যবহার করুন।',
-                ),
+                _bluetoothMode
+                    ? t.choose(
+                        'Pair Android phones in Bluetooth settings first. '
+                            'Then select the host phone and enter the 6-digit PIN. '
+                            'Bluetooth needs no internet or relay server.',
+                        'আগে অ্যান্ড্রয়েড সেটিংসে ফোনগুলো পেয়ার করুন। '
+                            'তারপর হোস্ট ফোন বেছে ৬ সংখ্যার পিন দিন। '
+                            'ব্লুটুথে ইন্টারনেট বা রিলে সার্ভার লাগে না।',
+                      )
+                    : _onlineMode
+                    ? t.choose(
+                        'Requires a running bHiVE relay service. The room '
+                            'creator must keep the browser or app open. '
+                            'For HTTPS websites, enter a wss:// relay URL.',
+                        'bHiVE রিলে সার্ভার চালু থাকতে হবে। রুম নির্মাতার অ্যাপ '
+                            'বা ব্রাউজার চালু রাখতে হবে। HTTPS-এ wss:// ব্যবহার করুন।',
+                      )
+                    : t.choose(
+                        'Local Wi-Fi hosting works on Android/desktop; '
+                            'Web may join by IP. Room codes require Online / Server mode.',
+                        'স্থানীয় Wi-Fi হোস্ট অ্যান্ড্রয়েড/ডেস্কটপে চলে। '
+                            'ওয়েব IP দিয়ে যোগ দিতে পারে। কোডের জন্য অনলাইন মোড বেছে নিন।',
+                      ),
                 style: TextStyle(
                   fontFamily: t.font,
                   color: Colors.white54,
@@ -301,10 +431,63 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Wrap(
+          spacing: 9,
+          runSpacing: 8,
+          children: [
+            ChoiceChip(
+              key: const ValueKey<String>('relay-online-mode'),
+              label: Text(t.choose('Online / Server', 'অনলাইন / সার্ভার')),
+              avatar: const Icon(Icons.cloud_outlined, size: 17),
+              selected: _onlineMode,
+              onSelected: (_) => _changeNetworkMode(true),
+            ),
+            ChoiceChip(
+              key: const ValueKey<String>('relay-lan-mode'),
+              label: Text(t.choose('Local Wi-Fi', 'স্থানীয় Wi-Fi')),
+              avatar: const Icon(Icons.wifi, size: 17),
+              selected: !_onlineMode && !_bluetoothMode,
+              onSelected: (_) => _changeNetworkMode(false),
+            ),
+            if (BluetoothGameBridge.isSupported)
+              ChoiceChip(
+                key: const ValueKey<String>('bluetooth-offline-mode'),
+                label: Text(
+                  t.choose('Bluetooth (Offline)', 'ব্লুটুথ (অফলাইন)'),
+                ),
+                avatar: const Icon(Icons.bluetooth, size: 17),
+                selected: _bluetoothMode,
+                onSelected: (_) => _changeBluetoothMode(),
+              ),
+          ],
+        ),
+        const SizedBox(height: 15),
+        if (_onlineMode) ...[
+          _label(
+            t.choose(
+              'Relay server WebSocket URL',
+              'রিলে সার্ভারের WebSocket URL',
+            ),
+          ),
+          TextField(
+            key: const ValueKey<String>('relay-endpoint-field'),
+            controller: _relayUrl,
+            keyboardType: TextInputType.url,
+            autocorrect: false,
+            enableSuggestions: false,
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              hintText: 'wss://example.com/bhive-relay/ws',
+              prefixIcon: Icon(Icons.dns_outlined),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+        Wrap(
           spacing: 10,
           runSpacing: 8,
           children: [
-            if (!kIsWeb)
+            if (_onlineMode || !kIsWeb)
               ChoiceChip(
                 label: Text(t.choose('Host game', 'হোস্ট করুন')),
                 avatar: const Icon(Icons.router_outlined, size: 17),
@@ -374,8 +557,8 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
             onChanged: (value) => setState(() => _sharePhoto = value),
             title: Text(
               t.choose(
-                'Share my profile photo with LAN players',
-                'LAN খেলোয়াড়দের সাথে আমার ছবি শেয়ার করুন',
+                'Share my profile photo with other players',
+                'অন্য খেলোয়াড়দের সাথে আমার ছবি শেয়ার করুন',
               ),
               style: TextStyle(
                 fontFamily: t.font,
@@ -385,10 +568,10 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
             ),
             subtitle: Text(
               t.choose(
-                'Optional: images are resized to fit 64 KB. '
-                    'Photos are shared over local Wi-Fi without encryption.',
-                'ঐচ্ছিক: ছবি ছোট করে ৬৪ কেবির মধ্যে রাখা হয়। '
-                    'স্থানীয় ওয়াই-ফাইতে এনক্রিপশন ছাড়া পাঠানো হবে।',
+                'Optional: photos are resized to fit 64 KB and sent to room members. '
+                    'For remote play, use a secure wss:// relay.',
+                'ঐচ্ছিক: ছবি ৬৪ কেবির মধ্যে ছোট করা হয় ও অন্যদের পাঠানো হয়। '
+                    'দূরবর্তী খেলায় নিরাপদ wss:// ব্যবহার করুন।',
               ),
               style: TextStyle(
                 fontFamily: t.font,
@@ -415,7 +598,7 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
             ],
           ),
         ] else ...[
-          if (!kIsWeb) ...[
+          if (!_onlineMode && !_bluetoothMode && !kIsWeb) ...[
             Row(
               children: [
                 Expanded(
@@ -478,31 +661,47 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
               ),
             const SizedBox(height: 14),
           ],
+          if (_bluetoothMode) ...[_bluetoothJoinPanel()],
+          if (!_onlineMode && !_bluetoothMode) ...[
+            _label(
+              t.choose(
+                'Host IP address (e.g. 192.168.1.5)',
+                'হোস্ট IP (যেমন 192.168.1.5)',
+              ),
+            ),
+            TextField(
+              controller: _ip,
+              keyboardType: TextInputType.url,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                hintText: '192.168.1.5:8787',
+                prefixIcon: Icon(Icons.lan_outlined),
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
           _label(
-            t.choose(
-              'Host IP address (e.g. 192.168.1.5)',
-              'হোস্ট IP (যেমন 192.168.1.5)',
-            ),
+            _onlineMode
+                ? t.choose('8-character room code', '৮ অক্ষরের রুম কোড')
+                : t.choose('6-digit room PIN', '৬ সংখ্যার রুম পিন'),
           ),
           TextField(
-            controller: _ip,
-            keyboardType: TextInputType.url,
-            style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              hintText: '192.168.1.5:8787',
-              prefixIcon: Icon(Icons.lan_outlined),
-            ),
-          ),
-          const SizedBox(height: 14),
-          _label(t.choose('6-digit room PIN', '৬ সংখ্যার রুম পিন')),
-          TextField(
+            key: const ValueKey<String>('relay-room-code-field'),
             controller: _pin,
-            keyboardType: TextInputType.number,
-            inputFormatters: [
-              FilteringTextInputFormatter.digitsOnly,
-              LengthLimitingTextInputFormatter(6),
-            ],
+            keyboardType: _onlineMode
+                ? TextInputType.text
+                : TextInputType.number,
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: _onlineMode
+                ? <TextInputFormatter>[
+                    FilteringTextInputFormatter.allow(RegExp('[A-Za-z0-9]')),
+                    LengthLimitingTextInputFormatter(8),
+                  ]
+                : <TextInputFormatter>[
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(6),
+                  ],
             style: const TextStyle(color: Colors.white),
             decoration: const InputDecoration(
               border: OutlineInputBorder(),
@@ -536,6 +735,69 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
     ),
   );
 
+  Widget _bluetoothJoinPanel() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Row(
+        children: [
+          Expanded(
+            child: _label(
+              t.choose('Paired Android phones', 'পেয়ার করা অ্যান্ড্রয়েড ফোন'),
+            ),
+          ),
+          IconButton(
+            key: const ValueKey<String>('bluetooth-refresh'),
+            tooltip: t.choose(
+              'Refresh paired phones',
+              'পেয়ার ফোনগুলো আবার দেখুন',
+            ),
+            onPressed: _loadingBluetoothDevices
+                ? null
+                : _refreshBluetoothDevices,
+            icon: const Icon(Icons.refresh_rounded, color: kBoardGold),
+          ),
+        ],
+      ),
+      if (_loadingBluetoothDevices) const LinearProgressIndicator(),
+      if (_pairedBluetoothDevices.isEmpty && !_loadingBluetoothDevices)
+        Text(
+          t.choose(
+            'No paired phones found. Pair with the host from Android Bluetooth settings, then refresh.',
+            'পেয়ার করা ফোন নেই। অ্যান্ড্রয়েড ব্লুটুথ সেটিংসে হোস্টের সাথে পেয়ার করে রিফ্রেশ করুন।',
+          ),
+          style: TextStyle(color: Colors.white70, fontFamily: t.font),
+        ),
+      for (final device in _pairedBluetoothDevices)
+        ListTile(
+          key: ValueKey<String>('bluetooth-device-${device.address}'),
+          leading: Icon(
+            _bluetoothAddress.text == device.address
+                ? Icons.radio_button_checked_rounded
+                : Icons.radio_button_unchecked_rounded,
+            color: kBoardGold,
+          ),
+          title: Text(device.name, style: const TextStyle(color: Colors.white)),
+          subtitle: Text(
+            device.address,
+            style: const TextStyle(color: Colors.white60),
+          ),
+          onTap: () => setState(() => _bluetoothAddress.text = device.address),
+        ),
+      const SizedBox(height: 6),
+      OutlinedButton.icon(
+        onPressed: () => unawaited(BluetoothGameBridge.instance.openSettings()),
+        icon: const Icon(Icons.settings_bluetooth),
+        label: Text(
+          t.choose(
+            'Open Android Bluetooth pairing',
+            'অ্যান্ড্রয়েড ব্লুটুথ পেয়ারিং খুলুন',
+          ),
+        ),
+      ),
+      const SizedBox(height: 12),
+    ],
+  );
+
   Widget _waitingPanel(LanRoomController room) => _panel(
     Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -559,54 +821,97 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
         ),
         const SizedBox(height: 18),
         if (room.isHost) ...[
-          _label(t.choose('Host device IP', 'হোস্ট ডিভাইসের IP')),
-          for (final address in room.hostAddresses)
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: SelectableText(
-                '$address:${room.port}',
-                style: const TextStyle(color: Colors.white, fontSize: 18),
-              ),
-              trailing: IconButton(
-                icon: const Icon(Icons.copy, color: kBoardGold),
-                onPressed: () => Clipboard.setData(
-                  ClipboardData(text: '$address:${room.port}'),
-                ),
-              ),
-            ),
-          if (room.hostAddresses.isEmpty)
-            Text(
-              t.choose(
-                'Find your Wi-Fi IPv4 address in device settings.',
-                'ডিভাইসের সেটিংস থেকে Wi-Fi IPv4 ঠিকানা দেখুন।',
-              ),
+          if (room.isRelayRoom) ...[
+            _label(t.choose('Relay server', 'রিলে সার্ভার')),
+            SelectableText(
+              room.relayUri!.toString(),
               style: const TextStyle(color: Colors.white70),
             ),
-          Text(
-            t.choose(
-              'The room is advertised on local Wi-Fi when broadcast '
-                  'is permitted. Share the PIN separately.',
-              'নেটওয়ার্ক অনুমতি দিলে রুমটি ওয়াই-ফাইতে দেখা যাবে। PIN আলাদা করে দিন।',
+          ] else if (room.isBluetoothRoom) ...[
+            _label(t.choose('Bluetooth host', 'ব্লুটুথ হোস্ট')),
+            Text(
+              t.choose(
+                'Bluetooth room ready. Ask friends to pair with this Android phone '
+                    'in Bluetooth settings, then join using the PIN below.',
+                'ব্লুটুথ রুম প্রস্তুত। বন্ধুদের ফোনটি ব্লুটুথ সেটিংসে পেয়ার '
+                    'করে নিচের পিন দিয়ে যোগ দিতে বলুন।',
+              ),
+              style: TextStyle(color: Colors.white70, fontFamily: t.font),
             ),
-            style: TextStyle(
-              fontFamily: t.font,
-              color: Colors.white60,
-              fontSize: 12,
+            const SizedBox(height: 10),
+            TextButton.icon(
+              onPressed: () =>
+                  unawaited(BluetoothGameBridge.instance.openSettings()),
+              icon: const Icon(Icons.settings_bluetooth_rounded),
+              label: Text(t.choose('Bluetooth settings', 'ব্লুটুথ সেটিংস')),
             ),
-          ),
+          ] else ...[
+            _label(t.choose('Host device IP', 'হোস্ট ডিভাইসের IP')),
+            for (final address in room.hostAddresses)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: SelectableText(
+                  '$address:${room.port}',
+                  style: const TextStyle(color: Colors.white, fontSize: 18),
+                ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.copy, color: kBoardGold),
+                  onPressed: () => Clipboard.setData(
+                    ClipboardData(text: '$address:${room.port}'),
+                  ),
+                ),
+              ),
+            if (room.hostAddresses.isEmpty)
+              Text(
+                t.choose(
+                  'Find your Wi-Fi IPv4 address in device settings.',
+                  'ডিভাইসের সেটিংস থেকে Wi-Fi IPv4 ঠিকানা দেখুন।',
+                ),
+                style: const TextStyle(color: Colors.white70),
+              ),
+            Text(
+              t.choose(
+                'The room is advertised on local Wi-Fi when broadcast '
+                    'is permitted. Share the PIN separately.',
+                'নেটওয়ার্ক অনুমতি দিলে রুমটি ওয়াই-ফাইতে দেখা যাবে। PIN আলাদা করে দিন।',
+              ),
+              style: TextStyle(
+                fontFamily: t.font,
+                color: Colors.white60,
+                fontSize: 12,
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           _label(
-            t.choose('Give players this room PIN', 'খেলোয়াড়দের এই রুম পিন দিন'),
+            room.isRelayRoom
+                ? t.choose('Share this room code', 'এই রুম কোডটি শেয়ার করুন')
+                : t.choose(
+                    'Give players this room PIN',
+                    'খেলোয়াড়দের এই রুম পিন দিন',
+                  ),
           ),
-          SelectableText(
-            room.pin,
-            style: const TextStyle(
-              color: Colors.white,
-              fontFamily: 'Exo2',
-              fontSize: 36,
-              letterSpacing: 6,
-              fontWeight: FontWeight.bold,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: SelectableText(
+                  room.pin,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontFamily: 'Exo2',
+                    fontSize: 33,
+                    letterSpacing: 4,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              IconButton(
+                key: const ValueKey<String>('relay-copy-code'),
+                icon: const Icon(Icons.copy, color: kBoardGold),
+                onPressed: () =>
+                    Clipboard.setData(ClipboardData(text: room.pin)),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
         ],

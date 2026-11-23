@@ -13,6 +13,7 @@ import '../game_text.dart';
 import 'animated_board_tokens.dart';
 import 'active_position_glow.dart';
 import 'board_center_action.dart';
+import 'jail_tile_marker.dart';
 import 'ownership_corner_badge.dart';
 
 const Color kBoardGold = Color(0xFFE9BE67);
@@ -62,6 +63,7 @@ class GameBoardView extends StatelessWidget {
     this.perspective = true,
     this.cameraOverride,
     this.transformationController,
+    this.onInteractionStart,
     this.visiblePositions = const <int, int>{},
     this.dicePreview,
     this.diceRolling = false,
@@ -84,6 +86,7 @@ class GameBoardView extends StatelessWidget {
 
   /// Allows the full-screen board to provide working zoom/reset controls.
   final TransformationController? transformationController;
+  final GestureScaleStartCallback? onInteractionStart;
   final Map<int, int> visiblePositions;
   final DiceRoll? dicePreview;
   final bool diceRolling;
@@ -122,6 +125,7 @@ class GameBoardView extends StatelessWidget {
                 borderRadius: BorderRadius.circular(18),
                 child: InteractiveViewer(
                   transformationController: transformationController,
+                  onInteractionStart: onInteractionStart,
                   minScale: 1,
                   maxScale: 4.5,
                   boundaryMargin: const EdgeInsets.all(180),
@@ -392,6 +396,20 @@ class GameBoardView extends StatelessWidget {
                       isCurrentTurn: isCurrentPosition,
                       reducedMotion:
                           GameExperienceSettings.instance.reducedMotion,
+                    ),
+                  ),
+                // Prison-bar marker is an overlay: it never takes space from
+                // the tile label/number and cannot trigger a Flex overflow.
+                if (data.kind == SpaceKind.jail ||
+                    data.kind == SpaceKind.goToJail)
+                  Positioned(
+                    right: 3,
+                    top: 4,
+                    child: IgnorePointer(
+                      child: JailTileMarker(
+                        key: ValueKey<String>('board-jail-icon-${data.index}'),
+                        goToJail: data.kind == SpaceKind.goToJail,
+                      ),
                     ),
                   ),
               ],

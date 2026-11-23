@@ -8,12 +8,16 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../engine/game_engine.dart';
 import '../experience/player_palette.dart';
 import '../models/game_models.dart';
+import 'bluetooth_game_bridge.dart';
+import 'bluetooth_host_transport.dart';
 import 'lan_action_dispatcher.dart';
 import 'lan_avatar_codec.dart';
 import 'lan_discovery.dart';
 import 'lan_game_codec.dart';
 import 'lan_host_factory.dart';
 import 'lan_host_transport.dart';
+import 'relay_host_transport.dart';
+import 'relay_protocol.dart';
 import 'lan_trade_coordinator.dart';
 
 /// Versioned, small JSON protocol over WebSockets. A server controls the game.
@@ -131,6 +135,8 @@ class LanRoomController extends ChangeNotifier {
     required this.hostIp,
     required this.avatarIndex,
     required this.avatarBytes,
+    this.relayUri,
+    this.bluetoothAddress,
   });
 
   static const int protocolVersion = 3; // Phase 6 avatars + room discovery.
@@ -144,6 +150,11 @@ class LanRoomController extends ChangeNotifier {
   final String hostIp;
   final int avatarIndex;
   final Uint8List? avatarBytes;
+  final Uri? relayUri;
+  final String? bluetoothAddress;
+  bool get isBluetoothRoom => bluetoothAddress != null;
+  bool get isRelayRoom => relayUri != null;
+  Completer<void>? _relayJoinAck;
   final LanDiscoveryService _discovery = LanDiscoveryService();
   final LanActionDispatcher _dispatcher = LanActionDispatcher();
   final LanTradeCoordinator _trade = LanTradeCoordinator();
@@ -153,6 +164,7 @@ class LanRoomController extends ChangeNotifier {
 
   LanHostTransport? _host;
   WebSocketChannel? _channel;
+  BluetoothGuestConnection? _bluetoothClient;
   StreamSubscription<dynamic>? _subscription;
   int _connectionEpoch = 0;
   bool _closed = false;
@@ -286,6 +298,188 @@ class LanRoomController extends ChangeNotifier {
     return room;
   }
 
+  /// Android-only secure Bluetooth Classic room. No internet, router, or
+  /// ASP.NET server is required. Pair devices in Android settings first.
+  static Future<LanRoomController> hostBluetooth({
+    required String name,
+    int maxPlayers = 4,
+    int avatarIndex = 0,
+    Uint8List? avatarBytes,
+  }) async {
+    if (!BluetoothGameBridge.isSupported) {
+      throw UnsupportedError('Bluetooth hosting is available on Android only.');
+    }
+    if (name.trim().isEmpty || maxPlayers < 2 || maxPlayers > 6) {
+      throw ArgumentError('Enter a name and choose 2–6 player slots.');
+    }
+    final pin = (Random.secure().nextInt(900000) + 100000).toString();
+    final room = LanRoomController._(
+      isHost: true,
+      playerName: name.trim(),
+      pin: pin,
+      maxPlayers: maxPlayers,
+      port: 0,
+      hostIp: '',
+      bluetoothAddress: '', // Host has no remote-device address.
+      avatarIndex: LanAvatarCodec.preset(avatarIndex),
+      avatarBytes: LanAvatarCodec.decode(LanAvatarCodec.encode(avatarBytes)),
+    );
+    room.playerId = 0;
+    room._members.add(
+      LanMember(
+        id: 0,
+        name: name.trim(),
+        avatarIndex: room.avatarIndex,
+        avatarBytes: room.avatarBytes,
+      ),
+    );
+    try {
+      room._host = BluetoothHostTransport();
+      await room._host!.start(
+        onMessage: room._onHostMessage,
+        onDisconnect: room._onHostDisconnect,
+      );
+      return room;
+    } catch (_) {
+      await room._host?.close();
+      await room._discovery.close();
+      rethrow;
+    }
+  }
+
+  /// Join a paired Android Bluetooth host by its device address and PIN.
+  /// Gameplay still uses the same hello/welcome/state/action protocol.
+  static Future<LanRoomController> joinBluetooth({
+    required String name,
+    required String deviceAddress,
+    required String pin,
+    int avatarIndex = 0,
+    Uint8List? avatarBytes,
+  }) async {
+    if (!BluetoothGameBridge.isSupported) {
+      throw UnsupportedError('Bluetooth joining is available on Android only.');
+    }
+    if (name.trim().isEmpty || !RegExp(r'^\d{6}$').hasMatch(pin.trim())) {
+      throw ArgumentError('Enter a player name and 6-digit room PIN.');
+    }
+    final address = BluetoothGameDevice.fromMap(<String, String>{
+      'address': deviceAddress,
+      'name': 'Host',
+    }).address;
+    final room = LanRoomController._(
+      isHost: false,
+      playerName: name.trim(),
+      pin: pin.trim(),
+      maxPlayers: 6,
+      port: 0,
+      hostIp: '',
+      bluetoothAddress: address,
+      avatarIndex: LanAvatarCodec.preset(avatarIndex),
+      avatarBytes: LanAvatarCodec.decode(LanAvatarCodec.encode(avatarBytes)),
+    );
+    try {
+      await room._connect();
+      return room;
+    } catch (_) {
+      await room.shutdown();
+      rethrow;
+    }
+  }
+
+  /// Create a server-relayed room on Web or Android. The creating Flutter
+  /// client remains the authoritative game engine. The relay only routes
+  /// WebSocket traffic; a dedicated server process must be running.
+  static Future<LanRoomController> hostViaRelay({
+    required String name,
+    required Uri endpoint,
+    int maxPlayers = 4,
+    int avatarIndex = 0,
+    Uint8List? avatarBytes,
+  }) async {
+    if (name.trim().isEmpty || maxPlayers < 2 || maxPlayers > 6) {
+      throw ArgumentError('Enter a name and choose 2–6 player slots.');
+    }
+    final room = LanRoomController._(
+      isHost: true,
+      playerName: name.trim(),
+      pin: RelayProtocol.roomCode(),
+      maxPlayers: maxPlayers,
+      port: endpoint.hasPort
+          ? endpoint.port
+          : (endpoint.scheme == 'wss' ? 443 : 80),
+      hostIp: endpoint.host,
+      relayUri: endpoint,
+      avatarIndex: LanAvatarCodec.preset(avatarIndex),
+      avatarBytes: LanAvatarCodec.decode(LanAvatarCodec.encode(avatarBytes)),
+    );
+    room.playerId = 0;
+    room._members.add(
+      LanMember(
+        id: 0,
+        name: name.trim(),
+        avatarIndex: room.avatarIndex,
+        avatarBytes: room.avatarBytes,
+      ),
+    );
+    try {
+      room._host = RelayHostTransport(
+        endpoint: endpoint,
+        code: room.pin,
+        capacity: maxPlayers,
+        onConnectionLost: () {
+          if (room._closed) return;
+          room.connected = false;
+          room.paused = true;
+          room._error('Relay disconnected. The host must create a new room.');
+        },
+      );
+      await room._host!.start(
+        onMessage: room._onHostMessage,
+        onDisconnect: room._onHostDisconnect,
+      );
+      return room;
+    } catch (_) {
+      await room._host?.close();
+      await room._discovery.close();
+      rethrow;
+    }
+  }
+
+  /// Connect as a guest to an online room using the shared room code.
+  /// The existing hello/welcome/state/action protocol remains unchanged.
+  static Future<LanRoomController> joinRelay({
+    required String name,
+    required Uri endpoint,
+    required String roomCode,
+    int avatarIndex = 0,
+    Uint8List? avatarBytes,
+  }) async {
+    if (name.trim().isEmpty) {
+      throw ArgumentError('Please enter your player name.');
+    }
+    final code = RelayProtocol.verifiedCode(roomCode);
+    final room = LanRoomController._(
+      isHost: false,
+      playerName: name.trim(),
+      pin: code,
+      maxPlayers: 6,
+      port: endpoint.hasPort
+          ? endpoint.port
+          : (endpoint.scheme == 'wss' ? 443 : 80),
+      hostIp: endpoint.host,
+      relayUri: endpoint,
+      avatarIndex: LanAvatarCodec.preset(avatarIndex),
+      avatarBytes: LanAvatarCodec.decode(LanAvatarCodec.encode(avatarBytes)),
+    );
+    try {
+      await room._connect();
+      return room;
+    } catch (_) {
+      await room.shutdown();
+      rethrow;
+    }
+  }
+
   void _notify() {
     if (!_closed) notifyListeners();
   }
@@ -325,7 +519,7 @@ class LanRoomController extends ChangeNotifier {
   };
 
   void _broadcastRoom() {
-    if (isHost && !started) {
+    if (isHost && !isRelayRoom && !isBluetoothRoom && !started) {
       _discovery.updateAdvertisingCount(connectedPlayers);
     }
     _broadcast(_roomPacket());
@@ -482,7 +676,9 @@ class LanRoomController extends ChangeNotifier {
     }
     started = true;
     paused = false;
-    unawaited(_discovery.stopAdvertising());
+    if (!isRelayRoom && !isBluetoothRoom) {
+      unawaited(_discovery.stopAdvertising());
+    }
     game = GameEngine(
       playerNames: [for (final member in _members) member.name],
       colorIndices: PlayerColorPreferences.instance.selections,
@@ -663,7 +859,19 @@ class LanRoomController extends ChangeNotifier {
       _execute(0, packet);
     } else {
       try {
-        _channel?.sink.add(jsonEncode(packet));
+        final payload = jsonEncode(packet);
+        if (isBluetoothRoom) {
+          await _bluetoothClient?.send(payload);
+        } else if (isRelayRoom) {
+          _channel?.sink.add(
+            jsonEncode(<String, dynamic>{
+              'kind': 'to_host',
+              'payload': payload,
+            }),
+          );
+        } else {
+          _channel?.sink.add(payload);
+        }
       } catch (_) {
         _error('Connection failed. Rejoin the room.');
       }
@@ -671,11 +879,20 @@ class LanRoomController extends ChangeNotifier {
   }
 
   Future<void> _connect() async {
+    if (isBluetoothRoom) {
+      await _connectBluetooth();
+      return;
+    }
     final currentEpoch = ++_connectionEpoch;
     reconnecting = true;
     _notify();
-    final uri = Uri(scheme: 'ws', host: hostIp, port: port, path: '/');
+    final uri =
+        relayUri ?? Uri(scheme: 'ws', host: hostIp, port: port, path: '/');
+    // Do not create the relay acknowledgement Future until the WebSocket is
+    // open. If the socket fails before channel.ready, completing that Future
+    // with an error would be unhandled because nothing is awaiting it yet.
     try {
+      var disconnectedDuringConnect = false;
       final channel = WebSocketChannel.connect(uri);
       _channel = channel;
       _subscription = channel.stream.listen(
@@ -684,28 +901,39 @@ class LanRoomController extends ChangeNotifier {
           _onClientMessage(message);
         },
         onDone: () {
+          disconnectedDuringConnect = true;
           _onClientLost(currentEpoch);
         },
         onError: (_) {
+          disconnectedDuringConnect = true;
           _onClientLost(currentEpoch);
         },
         cancelOnError: true,
       );
       await channel.ready.timeout(const Duration(seconds: 8));
       if (_closed || currentEpoch != _connectionEpoch) return;
+      if (disconnectedDuringConnect) {
+        throw StateError(
+          'Relay WebSocket closed before the room handshake. '
+          'Check the server address, network access, and server console.',
+        );
+      }
       connected = true;
       reconnecting = false;
-      channel.sink.add(
-        jsonEncode(<String, dynamic>{
-          'type': 'hello',
-          'version': protocolVersion,
-          'name': playerName,
-          'pin': pin,
-          if (_reconnectSecret.isNotEmpty) 'token': _reconnectSecret,
-          'avatarIndex': avatarIndex,
-          'avatarData': LanAvatarCodec.encode(avatarBytes),
-        }),
-      );
+      if (isRelayRoom) {
+        // Create and immediately await the join acknowledgement only *after*
+        // the socket has opened, so close/error callbacks cannot complete an
+        // orphaned Completer with an unhandled StateError.
+        final joinAck = Completer<void>();
+        _relayJoinAck = joinAck;
+        channel.sink.add(
+          jsonEncode(<String, dynamic>{'kind': 'join', 'room': pin}),
+        );
+        await joinAck.future.timeout(const Duration(seconds: 8));
+        if (identical(_relayJoinAck, joinAck)) _relayJoinAck = null;
+      } else {
+        _sendHello(channel);
+      }
       _notify();
     } catch (error) {
       if (currentEpoch != _connectionEpoch) return;
@@ -715,9 +943,63 @@ class LanRoomController extends ChangeNotifier {
       _subscription = null;
       await _channel?.sink.close();
       _channel = null;
-      _error('Could not connect to $hostIp:$port — $error');
+      _relayJoinAck = null;
+      _error('Could not connect to ${relayUri ?? '$hostIp:$port'} — $error');
       rethrow;
     }
+  }
+
+  Future<void> _connectBluetooth() async {
+    final epoch = ++_connectionEpoch;
+    reconnecting = true;
+    _notify();
+    final client = BluetoothGuestConnection();
+    _bluetoothClient = client;
+    _subscription = client.messages.listen(
+      (message) {
+        if (!_closed && epoch == _connectionEpoch) _onClientMessage(message);
+      },
+      onDone: () => _onClientLost(epoch),
+      onError: (Object _) => _onClientLost(epoch),
+      cancelOnError: true,
+    );
+    try {
+      await client.connect(bluetoothAddress!);
+      if (_closed || epoch != _connectionEpoch) return;
+      connected = true;
+      reconnecting = false;
+      await client.send(jsonEncode(_helloPacket()));
+      _notify();
+    } catch (error) {
+      if (epoch != _connectionEpoch) return;
+      connected = false;
+      reconnecting = false;
+      await _subscription?.cancel();
+      _subscription = null;
+      await client.close();
+      _bluetoothClient = null;
+      _error('Bluetooth connection failed: $error');
+      rethrow;
+    }
+  }
+
+  Map<String, dynamic> _helloPacket() => <String, dynamic>{
+    'type': 'hello',
+    'version': protocolVersion,
+    'name': playerName,
+    'pin': pin,
+    if (_reconnectSecret.isNotEmpty) 'token': _reconnectSecret,
+    'avatarIndex': avatarIndex,
+    'avatarData': LanAvatarCodec.encode(avatarBytes),
+  };
+
+  void _sendHello(WebSocketChannel channel) {
+    final payload = jsonEncode(_helloPacket());
+    channel.sink.add(
+      isRelayRoom
+          ? jsonEncode(<String, dynamic>{'kind': 'to_host', 'payload': payload})
+          : payload,
+    );
   }
 
   void _onClientLost(int epoch) {
@@ -725,12 +1007,30 @@ class LanRoomController extends ChangeNotifier {
     connected = false;
     reconnecting = false;
     paused = true;
+    if (_relayJoinAck?.isCompleted == false) {
+      _relayJoinAck!.completeError(StateError('Relay connection lost.'));
+    }
     _error('Host connection lost. Reconnect to continue.');
   }
 
   void _onClientMessage(dynamic raw) {
     try {
       final data = jsonDecode(raw as String) as Map<String, dynamic>;
+      if (isRelayRoom && data['kind'] == 'joined') {
+        final channel = _channel;
+        if (channel != null) _sendHello(channel);
+        if (_relayJoinAck?.isCompleted == false) _relayJoinAck!.complete();
+        return;
+      }
+      if (isRelayRoom && data['kind'] == 'error') {
+        final message =
+            data['message']?.toString() ?? 'Cannot join relay room.';
+        if (_relayJoinAck?.isCompleted == false) {
+          _relayJoinAck!.completeError(StateError(message));
+        }
+        _error(message);
+        return;
+      }
       switch (data['type']) {
         case 'welcome':
           playerId = data['id'] as int;
@@ -799,12 +1099,15 @@ class LanRoomController extends ChangeNotifier {
       await _channel?.sink.close();
     } catch (_) {}
     _channel = null;
+    await _bluetoothClient?.close();
+    _bluetoothClient = null;
     await _connect();
   }
 
   Future<void> shutdown() async {
     if (_closed) return;
     _closed = true;
+    _relayJoinAck = null;
     ++_connectionEpoch;
     await _subscription?.cancel();
     _subscription = null;
@@ -812,6 +1115,8 @@ class LanRoomController extends ChangeNotifier {
       await _channel?.sink.close();
     } catch (_) {}
     _channel = null;
+    await _bluetoothClient?.close();
+    _bluetoothClient = null;
     await _host?.close();
     _host = null;
     await _discovery.close();

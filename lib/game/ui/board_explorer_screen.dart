@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../engine/game_engine.dart';
 import '../experience/board_camera_preset.dart';
+import '../experience/game_experience_settings.dart';
 import '../models/game_models.dart';
 import 'game_text.dart';
 import 'widgets/game_board_view.dart';
 import 'widgets/compact_players_strip.dart';
+import 'widgets/smart_board_focus_controller.dart';
 
 /// Full-screen, readable board inspector. The engine is only read here;
 /// property operations remain on the calling game screen.
@@ -59,16 +61,52 @@ class BoardExplorerScreen extends StatefulWidget {
   State<BoardExplorerScreen> createState() => _BoardExplorerScreenState();
 }
 
-class _BoardExplorerScreenState extends State<BoardExplorerScreen> {
+class _BoardExplorerScreenState extends State<BoardExplorerScreen>
+    with SingleTickerProviderStateMixin {
   late bool _threeD = widget.initial3D;
   late bool _showList = widget.initialList;
-  final TransformationController _transform = TransformationController();
+  late final SmartBoardFocusController _focus = SmartBoardFocusController(
+    vsync: this,
+  );
+  TransformationController get _transform => _focus.transform;
+  bool _focusQueued = false;
   double _boardSide = 360;
 
   @override
   void initState() {
     super.initState();
     widget.boardUpdates?.addListener(_onBoardUpdate);
+  }
+
+  void _scheduleFocus() {
+    if (!mounted || _focusQueued || _showList) return;
+    _focusQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusQueued = false;
+      if (!mounted || _showList) return;
+      final media = MediaQuery.of(context);
+      _focus.follow(
+        game: widget.gameProvider?.call() ?? widget.game,
+        visiblePositions: widget.visiblePositions,
+        side: _boardSide,
+        enabled: media.size.width < 720,
+        reducedMotion:
+            media.disableAnimations ||
+            GameExperienceSettings.instance.reducedMotion,
+      );
+    });
+  }
+
+  void _focusCurrent() {
+    final media = MediaQuery.of(context);
+    _focus.focusNow(
+      game: widget.gameProvider?.call() ?? widget.game,
+      visiblePositions: widget.visiblePositions,
+      side: _boardSide,
+      reducedMotion:
+          media.disableAnimations ||
+          GameExperienceSettings.instance.reducedMotion,
+    );
   }
 
   @override
@@ -81,13 +119,16 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen> {
   }
 
   void _onBoardUpdate() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      _scheduleFocus();
+    }
   }
 
   @override
   void dispose() {
     widget.boardUpdates?.removeListener(_onBoardUpdate);
-    _transform.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
@@ -100,6 +141,7 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen> {
   }
 
   void _setZoom(double value) {
+    _focus.pause();
     final next = value.clamp(1.0, 4.5).toDouble();
     // Match the actual square GameBoardView, not the taller phone viewport.
     final distance = (1 - next) * _boardSide / 2;
@@ -214,6 +256,7 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen> {
                   : LayoutBuilder(
                       builder: (context, box) {
                         _boardSide = box.biggest.shortestSide;
+                        _scheduleFocus();
                         return GameBoardView(
                           engine: currentGame,
                           text: t,
@@ -223,6 +266,7 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen> {
                               ? BoardCameraPreset.tabletop
                               : BoardCameraPreset.topDown,
                           transformationController: _transform,
+                          onInteractionStart: (_) => _focus.pause(),
                           visiblePositions: widget.visiblePositions,
                           dicePreview:
                               widget.diceValueProvider?.call() ??
@@ -234,9 +278,10 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen> {
                           onEndTurn: widget.onEndTurn,
                           canAct: widget.canAct,
                           actionEnabled: widget.actionEnabled,
-                          // The app-bar action is the one compact manual
-                          // fallback. Avoid duplicating REVIEW OPTIONS inside
-                          // the board center while the sheet is already open.
+                          // The inline status itself is the action button;
+                          // never add a second large REVIEW OPTIONS panel.
+                          onReviewDecision: widget.onReviewDecision,
+                          decisionEnabled: widget.decisionEnabled,
                           onViewActivity: widget.onViewActivity,
                         );
                       },
@@ -316,8 +361,17 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen> {
               icon: const Icon(Icons.center_focus_strong, color: kBoardGold),
               onPressed: () => _setZoom(1),
             ),
-            // Visible exit control next to zoom reset. The app bar back
-            // arrow remains available; this works in portrait/landscape.
+            IconButton(
+              key: const ValueKey<String>('board-smart-focus-current'),
+              tooltip: t.choose(
+                'Find current player',
+                'বর্তমান খেলোয়াড়কে দেখুন',
+              ),
+              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+              icon: const Icon(Icons.my_location_rounded, color: kBoardGold),
+              onPressed: _focusCurrent,
+            ),
+            // Full-screen exit remains to the right of the zoom controls.
             IconButton(
               key: const ValueKey<String>('board-exit-fullscreen'),
               tooltip: t.choose('Exit full screen', 'পূর্ণ পর্দা বন্ধ করুন'),

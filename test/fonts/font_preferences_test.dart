@@ -16,30 +16,33 @@ void main() {
     expect(FontCatalog.isAllowed('bn', 'Unregistered Font'), isFalse);
   });
 
-  test('Persists separate default fonts and restores them on relaunch', () async {
-    SharedPreferences.setMockInitialValues(<String, Object>{});
-    final firstSession = FontPreferences();
-    await firstSession.load();
-    expect(firstSession.banglaFamily, 'Karnaphuli');
-    expect(firstSession.englishFamily, 'Exo2');
+  test(
+    'Persists separate default fonts and restores them on relaunch',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final firstSession = FontPreferences();
+      await firstSession.load();
+      expect(firstSession.banglaFamily, 'Karnaphuli');
+      expect(firstSession.englishFamily, 'Exo2');
 
-    await firstSession.save(banglaFamily: 'Nikosh', englishFamily: 'Roboto');
-    expect(firstSession.banglaFamily, 'Nikosh');
-    expect(firstSession.englishFamily, 'Roboto');
-    expect(firstSession.fallbacksFor('bn'), contains('Karnaphuli'));
+      await firstSession.save(banglaFamily: 'Nikosh', englishFamily: 'Roboto');
+      expect(firstSession.banglaFamily, 'Nikosh');
+      expect(firstSession.englishFamily, 'Roboto');
+      expect(firstSession.fallbacksFor('bn'), contains('Karnaphuli'));
 
-    final secondSession = FontPreferences();
-    await secondSession.load();
-    expect(secondSession.banglaFamily, 'Nikosh');
-    expect(secondSession.englishFamily, 'Roboto');
+      final secondSession = FontPreferences();
+      await secondSession.load();
+      expect(secondSession.banglaFamily, 'Nikosh');
+      expect(secondSession.englishFamily, 'Roboto');
 
-    await secondSession.restoreDefaults();
-    expect(secondSession.banglaFamily, 'Karnaphuli');
-    expect(secondSession.englishFamily, 'Exo2');
+      await secondSession.restoreDefaults();
+      expect(secondSession.banglaFamily, 'Karnaphuli');
+      expect(secondSession.englishFamily, 'Exo2');
 
-    firstSession.dispose();
-    secondSession.dispose();
-  });
+      firstSession.dispose();
+      secondSession.dispose();
+    },
+  );
 
   test('Invalid stale selections safely resolve to default font', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{
@@ -52,7 +55,6 @@ void main() {
     expect(prefs.englishFamily, 'Exo2');
     prefs.dispose();
   });
-
 
   test('Previously saved Hadi default migrates once to Karnaphuli', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{
@@ -74,19 +76,23 @@ void main() {
     nextSession.dispose();
   });
 
-  test('Existing explicit Nikosh selection is not reset by migration', () async {
-    SharedPreferences.setMockInitialValues(<String, Object>{
-      'bhive_font_bangla_v1': 'Nikosh',
-      'bhive_font_english_v1': 'Exo2',
-    });
-    final prefs = FontPreferences();
-    await prefs.load();
-    expect(prefs.banglaFamily, 'Nikosh');
-    prefs.dispose();
-  });
+  test(
+    'Existing explicit Nikosh selection is not reset by migration',
+    () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'bhive_font_bangla_v1': 'Nikosh',
+        'bhive_font_english_v1': 'Exo2',
+      });
+      final prefs = FontPreferences();
+      await prefs.load();
+      expect(prefs.banglaFamily, 'Nikosh');
+      prefs.dispose();
+    },
+  );
 
-  testWidgets('FontAppBuilder applies saved locale font to Material theme',
-      (WidgetTester tester) async {
+  testWidgets('FontAppBuilder applies saved locale font to Material theme', (
+    WidgetTester tester,
+  ) async {
     // This test loads the singleton before the first widget frame.
     SharedPreferences.setMockInitialValues(<String, Object>{
       'bhive_font_bangla_v1': 'Karnaphuli',
@@ -95,21 +101,21 @@ void main() {
     await FontPreferences.instance.load();
     await tester.pumpWidget(
       MaterialApp(
-        builder: (context, child) => FontAppBuilder(
-          languageCode: 'bn',
-          child: child!,
-        ),
+        builder: (context, child) =>
+            FontAppBuilder(languageCode: 'bn', child: child!),
         home: const Scaffold(body: Text('বাংলা অ আ ক খ')),
       ),
     );
     expect(
-      Theme.of(tester.element(find.text('বাংলা অ আ ক খ')))
-          .textTheme.bodyMedium!.fontFamily,
+      Theme.of(
+        tester.element(find.text('বাংলা অ আ ক খ')),
+      ).textTheme.bodyMedium!.fontFamily,
       'Karnaphuli',
     );
     expect(
-      Theme.of(tester.element(find.text('বাংলা অ আ ক খ')))
-          .textTheme.bodyMedium!.fontFamilyFallback,
+      Theme.of(
+        tester.element(find.text('বাংলা অ আ ক খ')),
+      ).textTheme.bodyMedium!.fontFamilyFallback,
       <String>['Nikosh'],
     );
   });

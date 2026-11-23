@@ -495,8 +495,8 @@ class _GameSetupScreenState extends State<GameSetupScreen> {
                 icon: const Icon(Icons.wifi_rounded),
                 label: Text(
                   t.choose(
-                    'WI-FI / LAN MULTIPLAYER',
-                    'ওয়াই-ফাই / LAN মাল্টিপ্লেয়ার',
+                    'ONLINE / WI-FI MULTIPLAYER',
+                    'অনলাইন / ওয়াই-ফাই মাল্টিপ্লেয়ার',
                   ),
                   style: TextStyle(
                     fontFamily: t.font,

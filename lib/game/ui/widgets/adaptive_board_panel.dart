@@ -1,11 +1,15 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../engine/game_engine.dart';
 import '../../experience/board_camera_preset.dart';
+import '../../experience/game_experience_settings.dart';
 import '../../models/game_models.dart';
 import '../board_explorer_screen.dart';
 import '../game_text.dart';
 import 'game_board_view.dart';
+import 'smart_board_focus_controller.dart';
 
 /// Portrait phones keep a vertical board layout; landscape phones and tablets
 /// gain a board + action sidebar when there is enough horizontal room.
@@ -60,7 +64,56 @@ class AdaptiveBoardPanel extends StatefulWidget {
   State<AdaptiveBoardPanel> createState() => _AdaptiveBoardPanelState();
 }
 
-class _AdaptiveBoardPanelState extends State<AdaptiveBoardPanel> {
+class _AdaptiveBoardPanelState extends State<AdaptiveBoardPanel>
+    with SingleTickerProviderStateMixin {
+  late final SmartBoardFocusController _focus = SmartBoardFocusController(
+    vsync: this,
+  );
+  double _boardSide = 0;
+  bool _focusQueued = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.boardUpdates?.addListener(_scheduleFocus);
+  }
+
+  @override
+  void didUpdateWidget(covariant AdaptiveBoardPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.boardUpdates != widget.boardUpdates) {
+      oldWidget.boardUpdates?.removeListener(_scheduleFocus);
+      widget.boardUpdates?.addListener(_scheduleFocus);
+    }
+    _scheduleFocus();
+  }
+
+  void _scheduleFocus() {
+    if (!mounted || _focusQueued) return;
+    _focusQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusQueued = false;
+      if (!mounted || _boardSide <= 0) return;
+      final media = MediaQuery.of(context);
+      _focus.follow(
+        game: widget.gameProvider?.call() ?? widget.game,
+        visiblePositions: widget.visiblePositions,
+        side: _boardSide,
+        enabled: media.size.width < 720,
+        reducedMotion:
+            media.disableAnimations ||
+            GameExperienceSettings.instance.reducedMotion,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    widget.boardUpdates?.removeListener(_scheduleFocus);
+    _focus.dispose();
+    super.dispose();
+  }
+
   bool _threeD = false; // Default to readable top-down on every phone.
 
   void _explore({bool list = false}) {
@@ -129,24 +182,32 @@ class _AdaptiveBoardPanelState extends State<AdaptiveBoardPanel> {
           ),
         ),
         Expanded(
-          child: GameBoardView(
-            engine: widget.game,
-            text: t,
-            onSelect: widget.onSelect,
-            perspective: true,
-            cameraOverride: _threeD
-                ? BoardCameraPreset.tabletop
-                : BoardCameraPreset.topDown,
-            visiblePositions: widget.visiblePositions,
-            dicePreview: widget.dicePreview,
-            diceRolling: widget.diceRolling,
-            onRoll: widget.onRoll,
-            onEndTurn: widget.onEndTurn,
-            canAct: widget.canAct,
-            actionEnabled: widget.actionEnabled,
-            onReviewDecision: widget.onReviewDecision,
-            decisionEnabled: widget.decisionEnabled,
-            onViewActivity: widget.onViewActivity,
+          child: LayoutBuilder(
+            builder: (context, size) {
+              _boardSide = math.min(size.maxWidth, size.maxHeight);
+              _scheduleFocus();
+              return GameBoardView(
+                engine: widget.gameProvider?.call() ?? widget.game,
+                text: t,
+                onSelect: widget.onSelect,
+                perspective: true,
+                cameraOverride: _threeD
+                    ? BoardCameraPreset.tabletop
+                    : BoardCameraPreset.topDown,
+                transformationController: _focus.transform,
+                onInteractionStart: (_) => _focus.pause(),
+                visiblePositions: widget.visiblePositions,
+                dicePreview: widget.dicePreview,
+                diceRolling: widget.diceRolling,
+                onRoll: widget.onRoll,
+                onEndTurn: widget.onEndTurn,
+                canAct: widget.canAct,
+                actionEnabled: widget.actionEnabled,
+                onReviewDecision: widget.onReviewDecision,
+                decisionEnabled: widget.decisionEnabled,
+                onViewActivity: widget.onViewActivity,
+              );
+            },
           ),
         ),
         SizedBox(
