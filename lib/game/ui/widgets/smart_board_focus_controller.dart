@@ -1,12 +1,10 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../../engine/game_engine.dart';
 import 'animated_board_tokens.dart';
 
-/// Camera math for the square board shown inside an InteractiveViewer.
-/// Coordinates here are *viewport logical pixels*, not the 1000x1000 model.
+/// Coordinates for the optional, manually triggered Find Current Player action.
+/// No part of this file starts tracking turns or player movement automatically.
 class SmartBoardCamera {
   const SmartBoardCamera._();
 
@@ -25,9 +23,9 @@ class SmartBoardCamera {
   }
 }
 
-/// Presentation-only active-player tracking; never mutates the GameEngine,
-/// dice rolls, save files, or packets. User gestures pause following until
-/// the next player's turn. A short return to overview leaves dice accessible.
+/// User-controlled zoom helper. It deliberately has NO turn listener,
+/// no timer, and no automatic recentering. The camera only moves when
+/// the user taps Find Current Player, Reset Zoom, or drags/pinches the board.
 class SmartBoardFocusController {
   SmartBoardFocusController({required TickerProvider vsync}) {
     _movement = AnimationController(
@@ -40,16 +38,14 @@ class SmartBoardFocusController {
   late final AnimationController _movement;
   Matrix4 _from = Matrix4.identity();
   Matrix4 _to = Matrix4.identity();
-  Timer? _overviewTimer;
-  int? _trackedPlayer;
-  int? _trackedPosition;
-  bool _manuallyExploring = false;
   bool _disposed = false;
 
   void _onTick() {
     if (_disposed) return;
-    final matrix = Matrix4Tween(begin: _from, end: _to).lerp(_movement.value);
-    transform.value = matrix;
+    transform.value = Matrix4Tween(
+      begin: _from,
+      end: _to,
+    ).lerp(_movement.value);
   }
 
   void _animateTo(Matrix4 matrix, {required bool reducedMotion}) {
@@ -63,53 +59,6 @@ class SmartBoardFocusController {
     _movement.forward(from: 0);
   }
 
-  void _showTile(int tile, double side, {required bool reducedMotion}) {
-    _overviewTimer?.cancel();
-    if (reducedMotion) {
-      return; // No automatic camera motion in accessibility mode.
-    }
-    _animateTo(
-      SmartBoardCamera.matrixForTile(tile, side),
-      reducedMotion: false,
-    );
-    // Moving the viewport indefinitely would hide the central dice. Return
-    // once the viewer has seen the current tile, unless they start panning.
-    _overviewTimer = Timer(const Duration(milliseconds: 1650), () {
-      if (_disposed || _manuallyExploring) return;
-      _animateTo(Matrix4.identity(), reducedMotion: false);
-    });
-  }
-
-  void follow({
-    required GameEngine game,
-    required Map<int, int> visiblePositions,
-    required double side,
-    required bool enabled,
-    required bool reducedMotion,
-  }) {
-    if (!enabled || side <= 0 || game.players.isEmpty || _disposed) return;
-    final player = game.currentPlayer;
-    if (player.bankrupt) return;
-    final tile = visiblePositions[player.id] ?? player.position;
-    if (reducedMotion) {
-      _overviewTimer?.cancel();
-      _movement.stop();
-      if (!_manuallyExploring) transform.value = Matrix4.identity();
-      _trackedPlayer = player.id;
-      _trackedPosition = tile;
-      return;
-    }
-    final changedTurn = player.id != _trackedPlayer;
-    if (changedTurn) _manuallyExploring = false;
-    if (_manuallyExploring ||
-        (_trackedPlayer == player.id && _trackedPosition == tile)) {
-      return;
-    }
-    _trackedPlayer = player.id;
-    _trackedPosition = tile;
-    _showTile(tile, side, reducedMotion: reducedMotion);
-  }
-
   void focusNow({
     required GameEngine game,
     required Map<int, int> visiblePositions,
@@ -117,35 +66,22 @@ class SmartBoardFocusController {
     required bool reducedMotion,
   }) {
     if (_disposed || side <= 0 || game.players.isEmpty) return;
-    _manuallyExploring = false;
     final player = game.currentPlayer;
-    _trackedPlayer = player.id;
-    _trackedPosition = visiblePositions[player.id] ?? player.position;
-    if (reducedMotion) {
-      // Accessible instant jump for an explicitly requested focus action.
-      _overviewTimer?.cancel();
-      _movement.stop();
-      transform.value = SmartBoardCamera.matrixForTile(_trackedPosition!, side);
-    } else {
-      _showTile(_trackedPosition!, side, reducedMotion: false);
-    }
+    final tile = visiblePositions[player.id] ?? player.position;
+    _animateTo(
+      SmartBoardCamera.matrixForTile(tile, side),
+      reducedMotion: reducedMotion,
+    );
   }
 
-  /// Called only for explicit human pan/zoom gestures or toolbar controls.
-  void pause() {
-    _manuallyExploring = true;
-    _overviewTimer?.cancel();
-    _movement.stop();
-  }
+  void pause() => _movement.stop();
 
   void reset({bool reducedMotion = false}) {
-    pause();
     _animateTo(Matrix4.identity(), reducedMotion: reducedMotion);
   }
 
   void dispose() {
     _disposed = true;
-    _overviewTimer?.cancel();
     _movement.removeListener(_onTick);
     _movement.dispose();
     transform.dispose();

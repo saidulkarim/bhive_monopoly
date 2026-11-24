@@ -9,75 +9,72 @@ import 'package:monopoly/core/fonts/font_app_builder.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('Default font order is Karnaphuli -> Nikosh and Exo2', () {
-    expect(FontCatalog.defaultFor('bn'), 'Karnaphuli');
-    expect(FontCatalog.fallbacks('bn', 'Karnaphuli'), <String>['Nikosh']);
+  test('KarnaphuliMJ default and supported Unicode fallbacks', () {
+    expect(FontCatalog.defaultFor('bn'), 'KarnaphuliMJ');
+    expect(FontCatalog.fallbacks('bn', 'KarnaphuliMJ'), <String>[
+      'Nikosh',
+      'NikoshBAN',
+    ]);
+    expect(FontCatalog.fallbacks('bn', 'Hadi'), <String>[
+      'Nikosh',
+      'NikoshBAN',
+    ]);
+    expect(FontCatalog.isAllowed('bn', 'KarnaphuliMJ'), isTrue);
     expect(FontCatalog.defaultFor('en'), 'Exo2');
-    expect(FontCatalog.isAllowed('bn', 'Unregistered Font'), isFalse);
   });
 
-  test(
-    'Persists separate default fonts and restores them on relaunch',
-    () async {
-      SharedPreferences.setMockInitialValues(<String, Object>{});
-      final firstSession = FontPreferences();
-      await firstSession.load();
-      expect(firstSession.banglaFamily, 'Karnaphuli');
-      expect(firstSession.englishFamily, 'Exo2');
+  test('Independent font choices persist and restore', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final first = FontPreferences();
+    await first.load();
+    expect(first.banglaFamily, 'KarnaphuliMJ');
+    expect(first.englishFamily, 'Exo2');
 
-      await firstSession.save(banglaFamily: 'Nikosh', englishFamily: 'Roboto');
-      expect(firstSession.banglaFamily, 'Nikosh');
-      expect(firstSession.englishFamily, 'Roboto');
-      expect(firstSession.fallbacksFor('bn'), contains('Karnaphuli'));
+    await first.save(banglaFamily: 'Hadi', englishFamily: 'Roboto');
+    expect(first.banglaFamily, 'Hadi');
+    expect(first.fallbacksFor('bn'), <String>['Nikosh', 'NikoshBAN']);
 
-      final secondSession = FontPreferences();
-      await secondSession.load();
-      expect(secondSession.banglaFamily, 'Nikosh');
-      expect(secondSession.englishFamily, 'Roboto');
+    final second = FontPreferences();
+    await second.load();
+    expect(second.banglaFamily, 'Hadi');
+    expect(second.englishFamily, 'Roboto');
 
-      await secondSession.restoreDefaults();
-      expect(secondSession.banglaFamily, 'Karnaphuli');
-      expect(secondSession.englishFamily, 'Exo2');
+    await second.restoreDefaults();
+    expect(second.banglaFamily, 'KarnaphuliMJ');
+    expect(second.englishFamily, 'Exo2');
+    first.dispose();
+    second.dispose();
+  });
 
-      firstSession.dispose();
-      secondSession.dispose();
-    },
-  );
-
-  test('Invalid stale selections safely resolve to default font', () async {
+  test('Invalid old selection reverts to KarnaphuliMJ default', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{
       'bhive_font_bangla_v1': 'MissingBanglaFont',
       'bhive_font_english_v1': 'MissingEnglishFont',
     });
     final prefs = FontPreferences();
     await prefs.load();
-    expect(prefs.banglaFamily, 'Karnaphuli');
+    expect(prefs.banglaFamily, 'KarnaphuliMJ');
     expect(prefs.englishFamily, 'Exo2');
     prefs.dispose();
   });
 
-  test('Previously saved Hadi default migrates once to Karnaphuli', () async {
+  test('Old Karnaphuli alias migrates to KarnaphuliMJ', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{
-      'bhive_font_bangla_v1': 'Hadi',
+      'bhive_font_bangla_v1': 'Karnaphuli',
       'bhive_font_english_v1': 'Exo2',
+      'bhive_font_migrated_to_karnaphuli_v1': true,
     });
-    final upgraded = FontPreferences();
-    await upgraded.load();
-    expect(upgraded.banglaFamily, 'Karnaphuli');
+    final prefs = FontPreferences();
+    await prefs.load();
+    expect(prefs.banglaFamily, 'KarnaphuliMJ');
     final stored = await SharedPreferences.getInstance();
-    expect(stored.getString('bhive_font_bangla_v1'), 'Karnaphuli');
-    expect(stored.getBool('bhive_font_migrated_to_karnaphuli_v1'), isTrue);
-    // After the one-time upgrade, intentionally choosing Hadi remains valid.
-    await upgraded.save(banglaFamily: 'Hadi', englishFamily: 'Exo2');
-    final nextSession = FontPreferences();
-    await nextSession.load();
-    expect(nextSession.banglaFamily, 'Hadi');
-    upgraded.dispose();
-    nextSession.dispose();
+    expect(stored.getString('bhive_font_bangla_v1'), 'KarnaphuliMJ');
+    expect(stored.getBool('bhive_font_default_karnaphuli_mj_v3'), isTrue);
+    prefs.dispose();
   });
 
   test(
-    'Existing explicit Nikosh selection is not reset by migration',
+    'Explicit Nikosh selection is preserved without prior migration',
     () async {
       SharedPreferences.setMockInitialValues(<String, Object>{
         'bhive_font_bangla_v1': 'Nikosh',
@@ -90,12 +87,27 @@ void main() {
     },
   );
 
-  testWidgets('FontAppBuilder applies saved locale font to Material theme', (
-    WidgetTester tester,
-  ) async {
-    // This test loads the singleton before the first widget frame.
+  test('Previous automatic Nikosh migration restores KarnaphuliMJ', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{
-      'bhive_font_bangla_v1': 'Karnaphuli',
+      'bhive_font_bangla_v1': 'Nikosh',
+      'bhive_font_english_v1': 'Exo2',
+      'bhive_font_unicode_nikosh_v2': true,
+    });
+    final prefs = FontPreferences();
+    await prefs.load();
+    expect(prefs.banglaFamily, 'KarnaphuliMJ');
+    final stored = await SharedPreferences.getInstance();
+    expect(stored.getString('bhive_font_bangla_v1'), 'KarnaphuliMJ');
+    expect(stored.getBool('bhive_font_default_karnaphuli_mj_v3'), isTrue);
+    prefs.dispose();
+  });
+
+  testWidgets('App font builder keeps MJ selection with Unicode-safe text', (
+    tester,
+  ) async {
+    // Singleton is loaded only once in this isolate.
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'bhive_font_bangla_v1': 'KarnaphuliMJ',
       'bhive_font_english_v1': 'Exo2',
     });
     await FontPreferences.instance.load();
@@ -106,17 +118,11 @@ void main() {
         home: const Scaffold(body: Text('বাংলা অ আ ক খ')),
       ),
     );
-    expect(
-      Theme.of(
-        tester.element(find.text('বাংলা অ আ ক খ')),
-      ).textTheme.bodyMedium!.fontFamily,
-      'Karnaphuli',
-    );
-    expect(
-      Theme.of(
-        tester.element(find.text('বাংলা অ আ ক খ')),
-      ).textTheme.bodyMedium!.fontFamilyFallback,
-      <String>['Nikosh'],
-    );
+    final ctx = tester.element(find.text('বাংলা অ আ ক খ'));
+    expect(Theme.of(ctx).textTheme.bodyMedium!.fontFamily, 'Nikosh');
+    expect(Theme.of(ctx).textTheme.bodyMedium!.fontFamilyFallback, <String>[
+      'NikoshBAN',
+    ]);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 }

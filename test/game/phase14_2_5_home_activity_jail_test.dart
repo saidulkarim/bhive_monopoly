@@ -35,10 +35,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: BoardCenterAction(
-            engine: game,
-            text: const GameText('en'),
-          ),
+          body: BoardCenterAction(engine: game, text: const GameText('en')),
         ),
       ),
     );

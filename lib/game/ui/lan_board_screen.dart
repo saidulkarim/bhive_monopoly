@@ -1615,7 +1615,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
           Padding(
             padding: const EdgeInsets.only(bottom: 7),
             child: Text(
-              '• ${t.moneyInEvent(item)}',
+              '• ${t.eventText(item)}',
               style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ),

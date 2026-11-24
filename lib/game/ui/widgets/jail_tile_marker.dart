@@ -4,18 +4,25 @@ import 'package:flutter/material.dart';
 /// Drawn from Flutter primitives so it works offline, on Android and Web.
 /// It is deliberately overlaid on the tile, not added to the text Column.
 class JailTileMarker extends StatelessWidget {
-  const JailTileMarker({super.key, required this.goToJail});
+  const JailTileMarker({
+    super.key,
+    required this.goToJail,
+    this.size = 26,
+    this.label,
+  });
 
   final bool goToJail;
+  final double size;
+  final String? label;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      label: goToJail ? 'Go to Jail' : 'Jail / Just Visiting',
+      label: label ?? (goToJail ? 'Go to Jail' : 'Jail / Just Visiting'),
       image: true,
       child: SizedBox(
-        width: 26,
-        height: 26,
+        width: size,
+        height: size,
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: const Color(0xF3102325),
@@ -25,14 +32,12 @@ class JailTileMarker extends StatelessWidget {
           child: Stack(
             children: [
               Positioned.fill(
-                child: CustomPaint(
-                  painter: _PrisonBarsPainter(),
-                ),
+                child: CustomPaint(painter: _PrisonBarsPainter()),
               ),
               Center(
                 child: Icon(
                   goToJail ? Icons.lock_rounded : Icons.lock_outline_rounded,
-                  size: 12,
+                  size: size * 0.43,
                   color: const Color(0xFFFFE0A0),
                 ),
               ),

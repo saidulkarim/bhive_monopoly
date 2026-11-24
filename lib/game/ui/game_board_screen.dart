@@ -1221,7 +1221,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
                 ),
                 Expanded(
                   child: Text(
-                    t.moneyInEvent(line),
+                    t.eventText(line),
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                 ),

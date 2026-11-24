@@ -69,7 +69,6 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen>
     vsync: this,
   );
   TransformationController get _transform => _focus.transform;
-  bool _focusQueued = false;
   double _boardSide = 360;
 
   @override
@@ -78,25 +77,8 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen>
     widget.boardUpdates?.addListener(_onBoardUpdate);
   }
 
-  void _scheduleFocus() {
-    if (!mounted || _focusQueued || _showList) return;
-    _focusQueued = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _focusQueued = false;
-      if (!mounted || _showList) return;
-      final media = MediaQuery.of(context);
-      _focus.follow(
-        game: widget.gameProvider?.call() ?? widget.game,
-        visiblePositions: widget.visiblePositions,
-        side: _boardSide,
-        enabled: media.size.width < 720,
-        reducedMotion:
-            media.disableAnimations ||
-            GameExperienceSettings.instance.reducedMotion,
-      );
-    });
-  }
-
+  // Manual only: the board never pans/zooms just because a turn changed.
+  // The user can still tap Find Current Player in the zoom toolbar.
   void _focusCurrent() {
     final media = MediaQuery.of(context);
     _focus.focusNow(
@@ -121,7 +103,6 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen>
   void _onBoardUpdate() {
     if (mounted) {
       setState(() {});
-      _scheduleFocus();
     }
   }
 
@@ -256,7 +237,6 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen>
                   : LayoutBuilder(
                       builder: (context, box) {
                         _boardSide = box.biggest.shortestSide;
-                        _scheduleFocus();
                         return GameBoardView(
                           engine: currentGame,
                           text: t,

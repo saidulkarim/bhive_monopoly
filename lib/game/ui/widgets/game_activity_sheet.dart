@@ -111,7 +111,7 @@ class GameActivitySheet extends StatelessWidget {
                             ),
                           ),
                           title: Text(
-                            text.moneyInEvent(events[i]),
+                            text.eventText(events[i]),
                             style: TextStyle(
                               fontFamily: text.font,
                               fontFamilyFallback: text.fallbackFonts,

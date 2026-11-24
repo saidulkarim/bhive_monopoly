@@ -5,21 +5,25 @@ import 'package:monopoly/core/fonts/font_preferences.dart';
 import 'package:monopoly/game/ui/game_text.dart';
 
 void main() {
-  test('Karnaphuli primary uses Nikosh alone as fallback', () {
-    expect(FontCatalog.fallbacks('bn', 'Karnaphuli'), <String>['Nikosh']);
-    expect(FontCatalog.fallbacks('bn', 'Nikosh'), <String>['Karnaphuli']);
+  test('KarnaphuliMJ default uses Nikosh fallback when needed', () {
+    expect(FontCatalog.defaultFor('bn'), 'KarnaphuliMJ');
+    expect(FontCatalog.fallbacks('bn', 'KarnaphuliMJ'), <String>[
+      'Nikosh',
+      'NikoshBAN',
+    ]);
+    expect(FontCatalog.fallbacks('bn', 'Hadi'), <String>[
+      'Nikosh',
+      'NikoshBAN',
+    ]);
+    expect(FontCatalog.isAllowed('bn', 'KarnaphuliMJ'), isTrue);
     expect(FontCatalog.fallbacks('en', 'Exo2'), isEmpty);
     expect(FontCatalog.fallbacks('en', 'Roboto'), <String>['Exo2']);
-    expect(
-      FontCatalog.fallbacks('bn', 'Karnaphuli').contains('Karnaphuli'),
-      isFalse,
-    );
   });
 
   test('GameText respects the selected font fallback', () {
     const text = GameText('bn');
     final current = FontPreferences.instance.familyFor('bn');
-    expect(text.fallbackFonts, FontCatalog.fallbacks('bn', current));
-    expect(text.fallbackFonts, isNot(contains(current)));
+    expect(text.fallbackFonts, FontCatalog.renderFallbacks('bn', current));
+    expect(text.fallbackFonts, isNot(contains(text.font)));
   });
 }

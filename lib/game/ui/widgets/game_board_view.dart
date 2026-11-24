@@ -13,7 +13,8 @@ import '../game_text.dart';
 import 'animated_board_tokens.dart';
 import 'active_position_glow.dart';
 import 'board_center_action.dart';
-import 'jail_tile_marker.dart';
+import 'board_corner_symbol.dart';
+import 'board_special_symbol.dart';
 import 'ownership_corner_badge.dart';
 
 const Color kBoardGold = Color(0xFFE9BE67);
@@ -328,31 +329,44 @@ class GameBoardView extends StatelessWidget {
                     ),
                     Expanded(
                       child: Center(
-                        child: Text(
-                          text.spaceName(data.index, data.name),
-                          textAlign: TextAlign.center,
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontFamily: text.font,
-                            fontFamilyFallback: text.fallbackFonts,
-                            color: Colors.white,
-                            height: text.bn ? 1.23 : 1.1,
-                            fontWeight: FontWeight.w700,
-                            fontSize:
-                                data.kind == SpaceKind.go ||
-                                    data.kind == SpaceKind.jail ||
-                                    data.kind == SpaceKind.goToJail ||
-                                    data.kind == SpaceKind.freeParking
-                                ? (text.bn ? 15 : 15.5)
-                                : (text.bn ? 14.0 : 14.0),
-                          ),
-                        ),
+                        child:
+                            data.kind == SpaceKind.go ||
+                                data.kind == SpaceKind.jail ||
+                                data.kind == SpaceKind.freeParking ||
+                                data.kind == SpaceKind.goToJail
+                            ? BoardCornerSymbol(
+                                key: ValueKey<String>(
+                                  'board-corner-icon-${data.index}',
+                                ),
+                                index: data.index,
+                                kind: data.kind,
+                                label: text.spaceName(data.index, data.name),
+                              )
+                            : BoardSpecialSymbol.supports(data.index)
+                            ? BoardSpecialSymbol(
+                                index: data.index,
+                                label: text.spaceName(data.index, data.name),
+                                text: text,
+                              )
+                            : Text(
+                                text.spaceName(data.index, data.name),
+                                textAlign: TextAlign.center,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontFamily: text.font,
+                                  fontFamilyFallback: text.fallbackFonts,
+                                  color: Colors.white,
+                                  height: text.bn ? 1.23 : 1.1,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14,
+                                ),
+                              ),
                       ),
                     ),
-                    if (data.price > 0)
+                    if (data.price > 0 || data.tax > 0)
                       Text(
-                        text.money(data.price),
+                        text.money(data.price > 0 ? data.price : data.tax),
                         style: TextStyle(
                           color: kBoardGold,
                           fontSize: 13,
@@ -398,20 +412,8 @@ class GameBoardView extends StatelessWidget {
                           GameExperienceSettings.instance.reducedMotion,
                     ),
                   ),
-                // Prison-bar marker is an overlay: it never takes space from
-                // the tile label/number and cannot trigger a Flex overflow.
-                if (data.kind == SpaceKind.jail ||
-                    data.kind == SpaceKind.goToJail)
-                  Positioned(
-                    right: 3,
-                    top: 4,
-                    child: IgnorePointer(
-                      child: JailTileMarker(
-                        key: ValueKey<String>('board-jail-icon-${data.index}'),
-                        goToJail: data.kind == SpaceKind.goToJail,
-                      ),
-                    ),
-                  ),
+                // The four corner icons occupy the same center slot as the
+                // previous text labels. They never add vertical layout height.
               ],
             ),
           ),

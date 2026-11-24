@@ -12,11 +12,10 @@ import '../widgets/player_avatar.dart';
 import 'profile_screen.dart';
 import 'font_settings_screen.dart';
 import 'rules_screen.dart';
+import '../../game/engine/game_engine.dart';
 import '../../game/ui/game_setup_screen.dart';
 import '../../game/ui/game_typography.dart';
 import '../../game/ui/experience_settings_screen.dart';
-import '../../game/ui/three_d_showroom_screen.dart';
-import '../../game/ui/token_settings_screen.dart';
 import '../../game/ui/match_history_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
@@ -60,6 +59,7 @@ class HomeScreen extends ConsumerWidget {
         ),
       );
     }
+
     return AnimatedBuilder(
       animation: CurrencyPreferences.instance,
       builder: (context, _) => GameTypography(
@@ -142,10 +142,10 @@ class HomeScreen extends ConsumerWidget {
                               final caption = bn
                                   ? (compact ? 'শুরু' : 'খেলা শুরু করুন')
                                   : (narrow
-                                      ? 'PLAY'
-                                      : compact
-                                          ? 'START'
-                                          : 'START GAME');
+                                        ? 'PLAY'
+                                        : compact
+                                        ? 'START'
+                                        : 'START GAME');
                               return Stack(
                                 fit: StackFit.expand,
                                 children: [
@@ -231,15 +231,23 @@ class HomeScreen extends ConsumerWidget {
                         const SizedBox(height: 40),
                         LayoutBuilder(
                           builder: (context, constraints) {
-                            final sideBySide = constraints.maxWidth >= 680;
+                            // LayoutBuilder reports the *content* width,
+                            // after the page's 24dp padding on each side.
+                            // At an 800dp browser viewport this is 752dp;
+                            // the previous 760dp breakpoint stacked the two
+                            // cards, so the equal-height TableRow was skipped.
+                            // Two 350dp cards plus the 20dp gutter fit at 720dp.
+                            final sideBySide = constraints.maxWidth >= 720;
+                            // Let buttons grow with their text. Chrome font
+                            // metrics and browser zoom vary from Android.
                             final actionStyle = ButtonStyle(
                               minimumSize: const WidgetStatePropertyAll(
-                                Size(0, 56),
+                                Size(0, 52),
                               ),
                               padding: const WidgetStatePropertyAll(
                                 EdgeInsets.symmetric(
-                                  horizontal: 24,
-                                  vertical: 18,
+                                  horizontal: 18,
+                                  vertical: 12,
                                 ),
                               ),
                               shape: WidgetStatePropertyAll(
@@ -249,7 +257,9 @@ class HomeScreen extends ConsumerWidget {
                               ),
                             );
                             final profile = _Panel(
+                              key: const ValueKey<String>('home-profile-panel'),
                               child: Column(
+                                mainAxisSize: MainAxisSize.min,
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   PlayerAvatar(
@@ -265,8 +275,18 @@ class HomeScreen extends ConsumerWidget {
                                     ),
                                   ),
                                   const SizedBox(height: 8),
-                                  Text(l10n.profileIntro),
-                                  if (sideBySide) const Spacer(),
+                                  Text(
+                                    l10n.profileIntro,
+                                    style: TextStyle(
+                                      fontSize: state.languageCode == 'bn'
+                                          ? 17
+                                          : 14,
+                                      height: state.languageCode == 'bn'
+                                          ? 1.5
+                                          : 1.35,
+                                    ),
+                                  ),
+                                  // Spacing is natural: no Spacer or tight height.
                                   const SizedBox(height: 24),
                                   FilledButton.icon(
                                     style: actionStyle,
@@ -287,7 +307,9 @@ class HomeScreen extends ConsumerWidget {
                               ),
                             );
                             final balance = _Panel(
+                              key: const ValueKey<String>('home-balance-panel'),
                               child: Column(
+                                mainAxisSize: MainAxisSize.min,
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   const Icon(
@@ -305,7 +327,7 @@ class HomeScreen extends ConsumerWidget {
                                   const SizedBox(height: 12),
                                   Text(
                                     MoneyFormatter.format(
-                                      1500,
+                                      GameEngine.startingCash,
                                       languageCode: state.languageCode,
                                     ),
                                     style: const TextStyle(
@@ -319,8 +341,16 @@ class HomeScreen extends ConsumerWidget {
                                     state.languageCode == 'bn'
                                         ? 'প্রত্যেকে একই পরিমাণ অর্থ নিয়ে শুরু করবে। ভাষা ও মুদ্রা মেনু থেকে আলাদাভাবে নির্বাচন করতে পারবেন।'
                                         : 'Everyone starts with the same balance. Set language and currency independently in Menu.',
+                                    style: TextStyle(
+                                      fontSize: state.languageCode == 'bn'
+                                          ? 17
+                                          : 14,
+                                      height: state.languageCode == 'bn'
+                                          ? 1.5
+                                          : 1.35,
+                                    ),
                                   ),
-                                  if (sideBySide) const Spacer(),
+                                  // Spacing is natural: no Spacer or tight height.
                                   const SizedBox(height: 24),
                                   OutlinedButton.icon(
                                     style: actionStyle,
@@ -336,18 +366,36 @@ class HomeScreen extends ConsumerWidget {
                               ),
                             );
                             if (sideBySide) {
-                              // Derive the shared height from the taller card so
-                              // translated text and wrapped names remain visible.
-                              return IntrinsicHeight(
-                                child: Row(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    Expanded(child: profile),
-                                    const SizedBox(width: 20),
-                                    Expanded(child: balance),
-                                  ],
-                                ),
+                              // One TableRow determines the taller card's
+                              // natural height and fills BOTH cells equally.
+                              // Unlike a fixed height or a Row with Spacer,
+                              // this tolerates Chrome text metrics, web zoom,
+                              // localization, and accessibility text scaling.
+                              return Table(
+                                columnWidths: const <int, TableColumnWidth>{
+                                  0: FlexColumnWidth(),
+                                  1: FixedColumnWidth(20),
+                                  2: FlexColumnWidth(),
+                                },
+                                defaultVerticalAlignment:
+                                    TableCellVerticalAlignment.fill,
+                                children: <TableRow>[
+                                  TableRow(
+                                    children: <Widget>[
+                                      TableCell(
+                                        verticalAlignment:
+                                            TableCellVerticalAlignment.fill,
+                                        child: profile,
+                                      ),
+                                      const SizedBox(width: 20),
+                                      TableCell(
+                                        verticalAlignment:
+                                            TableCellVerticalAlignment.fill,
+                                        child: balance,
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               );
                             }
                             return Column(
@@ -421,7 +469,16 @@ class HomeScreen extends ConsumerWidget {
       Widget Function() screen,
     ) => ListTile(
       leading: Icon(icon, color: AppTheme.gold),
-      title: Text(bn ? bangla : english),
+      title: Text(
+        bn ? bangla : english,
+        style: TextStyle(
+          fontFamily: GameTypography.family(languageCode),
+          fontFamilyFallback: GameTypography.fallbacks(languageCode),
+          fontSize: bn ? 17 : 16,
+          fontWeight: FontWeight.w500,
+          height: bn ? 1.38 : 1.2,
+        ),
+      ),
       onTap: () => navigate(screen()),
     );
 
@@ -433,9 +490,13 @@ class HomeScreen extends ConsumerWidget {
           children: [
             Text(
               bn ? 'bHiVE  •  সেটিংস' : 'bHiVE  •  SETTINGS',
-              style: const TextStyle(
-                fontFamily: 'Exo2',
-                fontSize: 21,
+              style: TextStyle(
+                fontFamily: bn ? GameTypography.family('bn') : 'Exo2',
+                fontFamilyFallback: bn
+                    ? GameTypography.fallbacks('bn')
+                    : const <String>[],
+                fontSize: bn ? 21 : 21,
+                height: bn ? 1.38 : 1.2,
                 color: AppTheme.gold,
                 fontWeight: FontWeight.bold,
               ),
@@ -443,7 +504,7 @@ class HomeScreen extends ConsumerWidget {
             const Divider(height: 32),
             Text(
               bn ? 'ভাষা' : 'Language',
-              style: const TextStyle(color: AppTheme.gold, fontSize: 15),
+              style: TextStyle(color: AppTheme.gold, fontSize: bn ? 17 : 15),
             ),
             const SizedBox(height: 9),
             Wrap(
@@ -458,7 +519,16 @@ class HomeScreen extends ConsumerWidget {
                       : (_) => _changeLanguage(context, ref, 'en'),
                 ),
                 ChoiceChip(
-                  label: const Text('বাংলা'),
+                  label: Text(
+                    'বাংলা',
+                    style: TextStyle(
+                      fontFamily: GameTypography.family('bn'),
+                      fontFamilyFallback: GameTypography.fallbacks('bn'),
+                      fontSize: 16,
+                      height: 1.38,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   selected: bn,
                   onSelected: isSaving
                       ? null
@@ -469,7 +539,7 @@ class HomeScreen extends ConsumerWidget {
             const SizedBox(height: 24),
             Text(
               bn ? 'মুদ্রা (প্রদর্শন)' : 'Currency display',
-              style: const TextStyle(color: AppTheme.gold, fontSize: 15),
+              style: TextStyle(color: AppTheme.gold, fontSize: bn ? 17 : 15),
             ),
             const SizedBox(height: 9),
             AnimatedBuilder(
@@ -479,7 +549,16 @@ class HomeScreen extends ConsumerWidget {
                 children: [
                   ChoiceChip(
                     key: const ValueKey<String>('home-currency-usd'),
-                    label: const Text(r'$  Dollar'),
+                    label: Text(
+                      bn ? r'$ ডলার' : r'$ Dollar',
+                      style: TextStyle(
+                        fontFamily: GameTypography.family(languageCode),
+                        fontFamilyFallback: GameTypography.fallbacks(
+                          languageCode,
+                        ),
+                        fontSize: bn ? 16 : 14,
+                      ),
+                    ),
                     selected:
                         CurrencyPreferences.instance.codeFor(languageCode) ==
                         'USD',
@@ -488,7 +567,16 @@ class HomeScreen extends ConsumerWidget {
                   ),
                   ChoiceChip(
                     key: const ValueKey<String>('home-currency-bdt'),
-                    label: const Text('৳  Taka'),
+                    label: Text(
+                      bn ? '৳ টাকা' : '৳ Taka',
+                      style: TextStyle(
+                        fontFamily: GameTypography.family(languageCode),
+                        fontFamilyFallback: GameTypography.fallbacks(
+                          languageCode,
+                        ),
+                        fontSize: bn ? 16 : 14,
+                      ),
+                    ),
                     selected:
                         CurrencyPreferences.instance.codeFor(languageCode) ==
                         'BDT',
@@ -505,18 +593,8 @@ class HomeScreen extends ConsumerWidget {
               'ফন্ট সেটিংস',
               () => FontSettingsScreen(languageCode: languageCode),
             ),
-            action(
-              Icons.view_in_ar_rounded,
-              '3D Showroom',
-              '৩ডি মডেল',
-              () => ThreeDShowroomScreen(languageCode: languageCode),
-            ),
-            action(
-              Icons.directions_car_rounded,
-              'Player Tokens',
-              'টোকেন নির্বাচন',
-              () => TokenSettingsScreen(languageCode: languageCode),
-            ),
+            // The showroom was only an optional asset preview, not part of
+            // gameplay. Token choice remains in the active game's menu.
             action(
               Icons.leaderboard_rounded,
               'Match History',
@@ -537,7 +615,7 @@ class HomeScreen extends ConsumerWidget {
 }
 
 class _Panel extends StatelessWidget {
-  const _Panel({required this.child});
+  const _Panel({super.key, required this.child});
   final Widget child;
 
   @override

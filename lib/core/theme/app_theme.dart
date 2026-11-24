@@ -12,8 +12,11 @@ class AppTheme {
 
   static ThemeData dark({String languageCode = 'en'}) => ThemeData(
     useMaterial3: true,
-    fontFamily: FontCatalog.defaultFor(languageCode),
-    fontFamilyFallback: FontCatalog.fallbacks(
+    fontFamily: FontCatalog.renderFamily(
+      languageCode,
+      FontCatalog.defaultFor(languageCode),
+    ),
+    fontFamilyFallback: FontCatalog.renderFallbacks(
       languageCode,
       FontCatalog.defaultFor(languageCode),
     ),

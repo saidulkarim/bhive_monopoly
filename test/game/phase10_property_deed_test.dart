@@ -75,7 +75,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('নদীর পাড়'), findsOneWidget);
+    expect(find.text('সদরঘাট'), findsOneWidget);
     expect(find.text('সম্পত্তির দলিল'), findsOneWidget);
   });
 }

@@ -16,10 +16,10 @@ class GameTypography extends StatelessWidget {
   final Widget child;
 
   static String family(String languageCode) =>
-      FontPreferences.instance.familyFor(languageCode);
+      FontPreferences.instance.renderFamilyFor(languageCode);
 
   static List<String> fallbacks(String languageCode) =>
-      FontPreferences.instance.fallbacksFor(languageCode);
+      FontPreferences.instance.renderFallbacksFor(languageCode);
 
   static TextStyle? style(String languageCode, TextStyle? base) =>
       base?.copyWith(

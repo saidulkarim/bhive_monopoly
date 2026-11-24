@@ -12,9 +12,12 @@ class FontPreferences extends ChangeNotifier {
   static final FontPreferences instance = FontPreferences();
   static const String _banglaKey = 'bhive_font_bangla_v1';
   static const String _englishKey = 'bhive_font_english_v1';
-  // One-time upgrade of the former Hadi default on existing installations.
-  static const String _karnaphuliMigrationKey =
-      'bhive_font_migrated_to_karnaphuli_v1';
+  // Phase 14.3.1 previously forced existing users to Nikosh.
+  // Restore the requested KarnaphuliMJ default once for migrated installs.
+  static const String _previousNikoshMigrationKey =
+      'bhive_font_unicode_nikosh_v2';
+  static const String _karnaphuliDefaultRestoredKey =
+      'bhive_font_default_karnaphuli_mj_v3';
 
   String _bangla = FontCatalog.defaultBangla;
   String _english = FontCatalog.defaultEnglish;
@@ -27,6 +30,14 @@ class FontPreferences extends ChangeNotifier {
 
   String familyFor(String languageCode) =>
       languageCode == 'bn' ? _bangla : _english;
+
+  /// Effective family for Unicode interface text, not stored preference.
+  /// KarnaphuliMJ stays selected until the player changes it.
+  String renderFamilyFor(String languageCode) =>
+      FontCatalog.renderFamily(languageCode, familyFor(languageCode));
+
+  List<String> renderFallbacksFor(String languageCode) =>
+      FontCatalog.renderFallbacks(languageCode, familyFor(languageCode));
 
   List<String> fallbacksFor(String languageCode) =>
       FontCatalog.fallbacks(languageCode, familyFor(languageCode));
@@ -41,23 +52,27 @@ class FontPreferences extends ChangeNotifier {
 
   Future<void> _readFromStorage() async {
     final preferences = await SharedPreferences.getInstance();
-    // The old app default was Hadi. Migrate it once so existing users also
-    // get Karnaphuli after upgrading, without resetting Nikosh choices.
-    // Once the marker is stored, explicitly choosing Hadi stays respected.
-    final hasMigrated = preferences.getBool(_karnaphuliMigrationKey) ?? false;
+    // Fresh installs use KarnaphuliMJ through FontCatalog.defaultBangla.
+    // Existing installs may have had their former choice automatically
+    // rewritten to Nikosh in Phase 14.3.1. Restore that specific prior
+    // migration once, while retaining explicit selections without its flag.
     var savedBangla = preferences.getString(_banglaKey);
-    if (!hasMigrated) {
-      if (savedBangla == 'Hadi') {
+    if (preferences.getBool(_karnaphuliDefaultRestoredKey) != true) {
+      final wasMovedToNikosh =
+          preferences.getBool(_previousNikoshMigrationKey) == true;
+      if (savedBangla == null ||
+          savedBangla == 'Karnaphuli' ||
+          (savedBangla == 'Nikosh' && wasMovedToNikosh)) {
         if (!await preferences.setString(
           _banglaKey,
           FontCatalog.defaultBangla,
         )) {
-          throw StateError('Could not migrate Bangla font preference');
+          throw StateError('Could not restore KarnaphuliMJ font preference');
         }
         savedBangla = FontCatalog.defaultBangla;
       }
-      if (!await preferences.setBool(_karnaphuliMigrationKey, true)) {
-        throw StateError('Could not store Bangla font migration');
+      if (!await preferences.setBool(_karnaphuliDefaultRestoredKey, true)) {
+        throw StateError('Could not save KarnaphuliMJ default migration');
       }
     }
     _bangla = FontCatalog.validated('bn', savedBangla);

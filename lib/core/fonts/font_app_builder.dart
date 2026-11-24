@@ -41,17 +41,23 @@ class _FontAppBuilderState extends State<FontAppBuilder> {
             Localizations.maybeLocaleOf(context)?.languageCode ??
             'en';
         final prefs = FontPreferences.instance;
-        final family = prefs.familyFor(code);
-        final fallback = prefs.fallbacksFor(code);
+        final family = prefs.renderFamilyFor(code);
+        final fallback = prefs.renderFallbacksFor(code);
         final theme = Theme.of(context);
+        // Apply one modest scale adjustment for Bengali. The UI uses a
+        // Unicode-safe render font even if the saved preference is MJ.
+        // Nested GameTypography must not scale text a second time.
+        final fontSizeFactor = code == 'bn' ? 1.08 : 1.0;
         final updated = theme.copyWith(
           textTheme: theme.textTheme.apply(
             fontFamily: family,
             fontFamilyFallback: fallback,
+            fontSizeFactor: fontSizeFactor,
           ),
           primaryTextTheme: theme.primaryTextTheme.apply(
             fontFamily: family,
             fontFamilyFallback: fallback,
+            fontSizeFactor: fontSizeFactor,
           ),
         );
         return Theme(
@@ -76,13 +82,13 @@ class _FontAppBuilderState extends State<FontAppBuilder> {
 extension SelectedFontTextStyle on TextStyle {
   TextStyle withSelectedFont(String languageCode) {
     final prefs = FontPreferences.instance;
-    final family = FontCatalog.validated(
+    final family = FontCatalog.renderFamily(
       languageCode,
-      prefs.familyFor(languageCode),
+      FontCatalog.validated(languageCode, prefs.familyFor(languageCode)),
     );
     return copyWith(
       fontFamily: family,
-      fontFamilyFallback: prefs.fallbacksFor(languageCode),
+      fontFamilyFallback: prefs.renderFallbacksFor(languageCode),
     );
   }
 }

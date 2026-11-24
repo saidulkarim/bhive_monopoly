@@ -195,8 +195,8 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
                   code: 'bn',
                   title: _text('Bangla / বাংলা', 'বাংলা ফন্ট'),
                   subtitle: _text(
-                    'Default: Karnaphuli · fallback: Nikosh',
-                    'ডিফল্ট: Karnaphuli · বিকল্প: Nikosh',
+                    'Default: KarnaphuliMJ',
+                    'ডিফল্ট: KarnaphuliMJ',
                   ),
                   selected: _bangla,
                   controller: _bnPreview,
@@ -291,7 +291,8 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
     required TextEditingController controller,
   }) {
     final options = FontCatalog.forLanguage(code);
-    final currentFallbacks = FontCatalog.fallbacks(code, selected);
+    final renderedFamily = FontCatalog.renderFamily(code, selected);
+    final currentFallbacks = FontCatalog.renderFallbacks(code, selected);
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -333,6 +334,25 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
                       }),
               ),
             ),
+          if (code == 'bn' &&
+              selected == 'KarnaphuliMJ' &&
+              !FontCatalog.karnaphuliSupportsUnicodeUi) ...<Widget>[
+            const SizedBox(height: 7),
+            Text(
+              _text(
+                'KarnaphuliMJ remains selected. This font file displays'
+                    ' Unicode Bangla incorrectly, so Nikosh is used'
+                    ' to keep the interface readable.',
+                'KarnaphuliMJ নির্বাচিত আছে। ইউনিকোড বাংলা স্পষ্ট দেখাতে'
+                    ' আপাতত Nikosh ব্যবহার করা হচ্ছে।',
+              ),
+              style: const TextStyle(
+                color: AppTheme.gold,
+                fontSize: 13,
+                height: 1.5,
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           Text(
             _text('Live preview', 'সরাসরি প্রিভিউ'),
@@ -348,7 +368,7 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
             maxLines: 2,
             onChanged: (_) => setState(() {}),
             style: TextStyle(
-              fontFamily: selected,
+              fontFamily: renderedFamily,
               fontFamilyFallback: currentFallbacks,
               color: Colors.white,
               fontSize: 15,
@@ -382,7 +402,7 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
                 Text(
                   controller.text.isEmpty ? 'Aa / অ আ ক খ' : controller.text,
                   style: TextStyle(
-                    fontFamily: selected,
+                    fontFamily: renderedFamily,
                     fontFamilyFallback: currentFallbacks,
                     color: Colors.white,
                     fontSize: 23,
@@ -407,7 +427,14 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
     required bool selected,
     required VoidCallback? onTap,
   }) {
-    final fallback = FontCatalog.fallbacks(option.languageCode, option.family);
+    final fallback = FontCatalog.renderFallbacks(
+      option.languageCode,
+      option.family,
+    );
+    final renderFamily = FontCatalog.renderFamily(
+      option.languageCode,
+      option.family,
+    );
     final sample = option.languageCode == 'bn'
         ? 'বাংলাদেশ · শুভ সকাল · ১২৩৪৫'
         : 'MONOPOLY · abc 12345';
@@ -455,7 +482,7 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
                       Text(
                         sample,
                         style: TextStyle(
-                          fontFamily: option.family,
+                          fontFamily: renderFamily,
                           fontFamilyFallback: fallback,
                           color: Colors.white,
                           fontSize: 17,
@@ -514,7 +541,10 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
         onPressed: _saving ? null : _resetSelection,
         icon: const Icon(Icons.restart_alt_rounded),
         label: Text(
-          _text('Restore Karnaphuli / Exo2', 'Karnaphuli / Exo2 ফিরিয়ে আনুন'),
+          _text(
+            'Restore KarnaphuliMJ / Exo2',
+            'KarnaphuliMJ / Exo2 ফিরিয়ে আনুন',
+          ),
         ),
       ),
     ],

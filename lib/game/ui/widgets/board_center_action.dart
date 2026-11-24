@@ -440,7 +440,7 @@ class BoardCenterAction extends StatelessWidget {
   }
 
   Widget _latestActivity(String latestEvent) {
-    final formatted = text.moneyInEvent(latestEvent);
+    final formatted = text.eventText(latestEvent);
     final lower = latestEvent.toLowerCase();
     final icon = lower.contains('bids') || lower.contains('auction')
         ? Icons.gavel_rounded
