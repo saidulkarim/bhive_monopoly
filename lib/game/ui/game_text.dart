@@ -1,4 +1,5 @@
 import '../core/board_data.dart';
+import '../models/activity_event.dart';
 import '../../core/fonts/font_preferences.dart';
 import '../../core/utils/money_formatter.dart';
 
@@ -88,6 +89,61 @@ class GameText {
 
   /// Render canonical engine logs in the viewer's language, without changing
   /// saved games, network messages or player names.
+  /// Prefer typed engine data where available. Other event descriptions use
+  /// the established bilingual templates, including legacy saves and cards.
+  String activityText(ActivityEvent event) {
+    final tile = event.tileIndex == null
+        ? null
+        : BoardData.spaces[event.tileIndex!];
+    final place = tile == null ? null : spaceName(tile.index, tile.name);
+    final actor = event.actors.isEmpty ? null : event.actors.first;
+    final amount = event.amount == null ? null : money(event.amount!);
+    switch (event.kind) {
+      case ActivityKind.movement:
+        if (actor != null && place != null) {
+          return choose(
+            '$actor landed on $place.',
+            '$actor $place ঘরে এসেছেন।',
+          );
+        }
+        break;
+      case ActivityKind.purchase:
+        if (actor != null && place != null && amount != null) {
+          return choose(
+            '$actor purchased $place for $amount.',
+            '$actor $amount দিয়ে $place কিনেছেন।',
+          );
+        }
+        break;
+      case ActivityKind.rent:
+        if (actor != null && event.actors.length == 2 && amount != null) {
+          final receiver = event.actors[1];
+          return choose(
+            '$actor paid $amount rent to $receiver.',
+            '$actor $receiver-কে $amount ভাড়া দিয়েছেন।',
+          );
+        }
+        break;
+      case ActivityKind.tax:
+        if (amount != null) {
+          return choose('Tax paid: $amount.', 'কর পরিশোধ: $amount।');
+        }
+        break;
+      case ActivityKind.trade:
+        if (actor != null && event.actors.length == 2) {
+          final other = event.actors[1];
+          return choose(
+            '$actor and $other completed a trade.',
+            '$actor ও $other লেনদেন সম্পন্ন করেছেন।',
+          );
+        }
+        break;
+      default:
+        break;
+    }
+    return eventText(event.raw);
+  }
+
   String eventText(String raw) {
     String place(String name) {
       for (final tile in BoardData.spaces) {

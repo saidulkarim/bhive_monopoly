@@ -2,6 +2,7 @@ import 'dart:math';
 
 import '../core/board_data.dart';
 import '../models/game_models.dart';
+import '../models/activity_event.dart';
 import '../validation/game_snapshot_validator.dart';
 
 /// Deterministic, Flutter-independent turn engine. Roll values are injected by
@@ -35,12 +36,40 @@ class GameEngine {
     _chanceDeck = List<int>.generate(_chance.length, (i) => i)..shuffle(random);
     _communityDeck = List<int>.generate(_community.length, (i) => i)
       ..shuffle(random);
-    log.add('Game started — ${players.first.name} rolls first.');
+    _log(
+      'Game started — ${players.first.name} rolls first.',
+      ActivityKind.turn,
+      actors: [players.first.name],
+    );
   }
 
   final List<PlayerState> players;
   final List<PropertyState> properties;
   final List<String> log = <String>[];
+  final List<ActivityEvent> _activity = <ActivityEvent>[];
+
+  /// Keep legacy strings available to older clients. Structured metadata is
+  /// emitted by the engine, not inferred from translated display text.
+  List<ActivityEvent> get activityEvents => List.unmodifiable([
+    for (var i = 0; i < log.length; i++)
+      if (i < _activity.length && _activity[i].raw == log[i])
+        _activity[i]
+      else
+        ActivityEvent.fromLog(log[i]),
+  ]);
+
+  void restoreActivity(Object? metadata) {
+    final entries = metadata is List && metadata.length == log.length
+        ? metadata
+        : null;
+    _activity
+      ..clear()
+      ..addAll([
+        for (var i = 0; i < log.length; i++)
+          ActivityEvent.restore(log[i], entries?[i]),
+      ]);
+  }
+
   late final List<int> _chanceDeck;
   late final List<int> _communityDeck;
 
@@ -84,9 +113,28 @@ class GameEngine {
   void _requirePhase(TurnPhase expected) =>
       _require(phase == expected, 'Action unavailable during ${phase.name}.');
 
-  void _log(String value) {
+  void _log(
+    String value,
+    ActivityKind kind, {
+    List<String> actors = const [],
+    int? tile,
+    int? amount,
+    ActivityFlow flow = ActivityFlow.neutral,
+  }) {
     log.insert(0, value);
+    _activity.insert(
+      0,
+      ActivityEvent(
+        raw: value,
+        kind: kind,
+        actors: List.unmodifiable(actors),
+        tileIndex: tile,
+        amount: amount,
+        flow: flow,
+      ),
+    );
     if (log.length > 70) log.removeLast();
+    if (_activity.length > 70) _activity.removeLast();
   }
 
   void roll(int first, int second) {
@@ -96,7 +144,11 @@ class GameEngine {
     lastRoll = dice;
     _consecutiveDoubles = dice.doubles ? _consecutiveDoubles + 1 : 0;
     _extraRoll = dice.doubles;
-    _log('${currentPlayer.name} rolled $first + $second = ${dice.sum}.');
+    _log(
+      '${currentPlayer.name} rolled $first + $second = ${dice.sum}.',
+      ActivityKind.dice,
+      actors: [currentPlayer.name],
+    );
     if (_consecutiveDoubles >= 3) {
       _sendToJail('Three doubles in a row');
       _endCurrentTurn();
@@ -115,7 +167,13 @@ class GameEngine {
     final rawPosition = old + steps;
     if (rawPosition >= 40) {
       currentPlayer.balance += goBonus;
-      _log('${currentPlayer.name} passed START and earned 200.');
+      _log(
+        '${currentPlayer.name} passed START and earned 200.',
+        ActivityKind.reward,
+        actors: [currentPlayer.name],
+        amount: 200,
+        flow: ActivityFlow.income,
+      );
     }
     currentPlayer.position = rawPosition % 40;
     _land();
@@ -125,7 +183,13 @@ class GameEngine {
     final old = currentPlayer.position;
     if (awardGo && destination < old) {
       currentPlayer.balance += goBonus;
-      _log('${currentPlayer.name} collected 200 for passing START.');
+      _log(
+        '${currentPlayer.name} collected 200 for passing START.',
+        ActivityKind.reward,
+        actors: [currentPlayer.name],
+        amount: 200,
+        flow: ActivityFlow.income,
+      );
     }
     currentPlayer.position = destination;
     _land();
@@ -133,7 +197,12 @@ class GameEngine {
 
   void _land() {
     final tile = spaces[currentPlayer.position];
-    _log('${currentPlayer.name} landed on ${tile.name}.');
+    _log(
+      '${currentPlayer.name} landed on ${tile.name}.',
+      ActivityKind.movement,
+      actors: [currentPlayer.name],
+      tile: tile.index,
+    );
     switch (tile.kind) {
       case SpaceKind.goToJail:
         _sendToJail('Landed on Go To Jail');
@@ -141,7 +210,14 @@ class GameEngine {
         return;
       case SpaceKind.tax:
         _charge(currentPlayerId, tile.tax);
-        _log('Tax paid: ${tile.tax}.');
+        _log(
+          'Tax paid: ${tile.tax}.',
+          ActivityKind.tax,
+          actors: [currentPlayer.name],
+          tile: tile.index,
+          amount: tile.tax,
+          flow: ActivityFlow.expense,
+        );
         _finishLanding();
         return;
       case SpaceKind.street:
@@ -157,6 +233,11 @@ class GameEngine {
             _charge(currentPlayerId, rent, creditorId: owner);
             _log(
               '${currentPlayer.name} paid $rent rent to ${players[owner].name}.',
+              ActivityKind.rent,
+              actors: [currentPlayer.name, players[owner].name],
+              tile: tile.index,
+              amount: rent,
+              flow: ActivityFlow.transfer,
             );
           }
           _finishLanding();
@@ -217,7 +298,14 @@ class GameEngine {
     );
     currentPlayer.balance -= tile.price;
     properties[index].ownerId = currentPlayerId;
-    _log('${currentPlayer.name} purchased ${tile.name} for ${tile.price}.');
+    _log(
+      '${currentPlayer.name} purchased ${tile.name} for ${tile.price}.',
+      ActivityKind.purchase,
+      actors: [currentPlayer.name],
+      tile: tile.index,
+      amount: tile.price,
+      flow: ActivityFlow.expense,
+    );
     pendingPurchaseIndex = null;
     _finishLanding();
   }
@@ -228,7 +316,11 @@ class GameEngine {
       spaceIndex: pendingPurchaseIndex!,
       bidderId: currentPlayerId,
     );
-    _log('${currentPlayer.name} declined purchase — auction opened.');
+    _log(
+      '${currentPlayer.name} declined purchase — auction opened.',
+      ActivityKind.auction,
+      actors: [currentPlayer.name],
+    );
     pendingPurchaseIndex = null;
     phase = TurnPhase.auction;
   }
@@ -244,7 +336,13 @@ class GameEngine {
     );
     a.highBid = amount;
     a.highestBidderId = a.bidderId;
-    _log('${players[a.bidderId].name} bids $amount.');
+    _log(
+      '${players[a.bidderId].name} bids $amount.',
+      ActivityKind.auction,
+      actors: [players[a.bidderId].name],
+      tile: a.spaceIndex,
+      amount: amount,
+    );
     _advanceAuction(a.bidderId);
   }
 
@@ -252,7 +350,12 @@ class GameEngine {
     _requirePhase(TurnPhase.auction);
     final a = auction!;
     a.passed.add(a.bidderId);
-    _log('${players[a.bidderId].name} passed.');
+    _log(
+      '${players[a.bidderId].name} passed.',
+      ActivityKind.auction,
+      actors: [players[a.bidderId].name],
+      tile: a.spaceIndex,
+    );
     _advanceAuction(a.bidderId);
   }
 
@@ -272,12 +375,21 @@ class GameEngine {
     if (contenders.isEmpty) {
       final winner = a.highestBidderId;
       if (winner == null) {
-        _log('No bids — ${spaces[a.spaceIndex].name} stays with the bank.');
+        _log(
+          'No bids — ${spaces[a.spaceIndex].name} stays with the bank.',
+          ActivityKind.auction,
+          tile: a.spaceIndex,
+        );
       } else {
         properties[a.spaceIndex].ownerId = winner;
         players[winner].balance -= a.highBid;
         _log(
           '${players[winner].name} won ${spaces[a.spaceIndex].name} for ${a.highBid}.',
+          ActivityKind.auction,
+          actors: [players[winner].name],
+          tile: a.spaceIndex,
+          amount: a.highBid,
+          flow: ActivityFlow.expense,
         );
       }
       auction = null;
@@ -304,7 +416,13 @@ class GameEngine {
     } else {
       phase = TurnPhase.roll;
     }
-    _log('${currentPlayer.name} paid 50 to leave Jail.');
+    _log(
+      '${currentPlayer.name} paid 50 to leave Jail.',
+      ActivityKind.jail,
+      actors: [currentPlayer.name],
+      amount: 50,
+      flow: ActivityFlow.expense,
+    );
   }
 
   void useJailCard() {
@@ -319,7 +437,11 @@ class GameEngine {
     }
     _releaseFromJail();
     phase = TurnPhase.roll;
-    _log('${currentPlayer.name} used a Get Out of Jail card.');
+    _log(
+      '${currentPlayer.name} used a Get Out of Jail card.',
+      ActivityKind.jail,
+      actors: [currentPlayer.name],
+    );
   }
 
   void tryJailRoll(int first, int second) {
@@ -331,16 +453,30 @@ class GameEngine {
     _consecutiveDoubles = 0;
     if (dice.doubles) {
       _releaseFromJail();
-      _log('${currentPlayer.name} rolled doubles and left Jail!');
+      _log(
+        '${currentPlayer.name} rolled doubles and left Jail!',
+        ActivityKind.jail,
+        actors: [currentPlayer.name],
+      );
       _move(dice.sum);
       return;
     }
     currentPlayer.jailFailedRolls++;
-    _log('Jail attempt ${currentPlayer.jailFailedRolls}/3 failed.');
+    _log(
+      'Jail attempt ${currentPlayer.jailFailedRolls}/3 failed.',
+      ActivityKind.jail,
+      actors: [currentPlayer.name],
+    );
     if (currentPlayer.jailFailedRolls == 3) {
       _charge(currentPlayerId, 50);
       _releaseFromJail();
-      _log('${currentPlayer.name} paid 50 on the third failed attempt.');
+      _log(
+        '${currentPlayer.name} paid 50 on the third failed attempt.',
+        ActivityKind.jail,
+        actors: [currentPlayer.name],
+        amount: 50,
+        flow: ActivityFlow.expense,
+      );
       _move(dice.sum);
     } else {
       phase = TurnPhase.complete;
@@ -358,7 +494,11 @@ class GameEngine {
     currentPlayer.jailFailedRolls = 0;
     _extraRoll = false;
     _consecutiveDoubles = 0;
-    _log('${currentPlayer.name} sent to Jail ($reason).');
+    _log(
+      '${currentPlayer.name} sent to Jail ($reason).',
+      ActivityKind.jail,
+      actors: [currentPlayer.name],
+    );
   }
 
   void _charge(int debtorId, int amount, {int? creditorId}) {
@@ -380,7 +520,11 @@ class GameEngine {
     if (currentPlayer.balance < 0) {
       _resumeAfterDebt = nextPhase;
       phase = TurnPhase.debt;
-      _log('${currentPlayer.name} must raise funds or declare bankruptcy.');
+      _log(
+        '${currentPlayer.name} must raise funds or declare bankruptcy.',
+        ActivityKind.debt,
+        actors: [currentPlayer.name],
+      );
     } else {
       phase = nextPhase;
       debtCreditorId = null;
@@ -393,7 +537,11 @@ class GameEngine {
       phase = _resumeAfterDebt;
       debtCreditorId = null;
       _pendingDebts.remove(currentPlayerId);
-      _log('${currentPlayer.name} resolved their debt.');
+      _log(
+        '${currentPlayer.name} resolved their debt.',
+        ActivityKind.debt,
+        actors: [currentPlayer.name],
+      );
     }
   }
 
@@ -421,7 +569,11 @@ class GameEngine {
         ? TurnPhase.jailDecision
         : TurnPhase.roll;
     phase = currentPlayer.balance < 0 ? TurnPhase.debt : _resumeAfterDebt;
-    _log('${currentPlayer.name}’s turn.');
+    _log(
+      '${currentPlayer.name}’s turn.',
+      ActivityKind.turn,
+      actors: [currentPlayer.name],
+    );
   }
 
   void _validateSpace(int index) =>
@@ -468,7 +620,14 @@ class GameEngine {
     }
     currentPlayer.balance -= tile.buildCost;
     state.development++;
-    _log('Built on ${tile.name} for ${tile.buildCost}.');
+    _log(
+      'Built on ${tile.name} for ${tile.buildCost}.',
+      ActivityKind.building,
+      actors: [currentPlayer.name],
+      tile: index,
+      amount: tile.buildCost,
+      flow: ActivityFlow.expense,
+    );
   }
 
   void sellBuilding(int index) {
@@ -495,7 +654,14 @@ class GameEngine {
     }
     state.development--;
     currentPlayer.balance += tile.buildCost ~/ 2;
-    _log('Sold a building at ${tile.name} for ${tile.buildCost ~/ 2}.');
+    _log(
+      'Sold a building at ${tile.name} for ${tile.buildCost ~/ 2}.',
+      ActivityKind.building,
+      actors: [currentPlayer.name],
+      tile: index,
+      amount: tile.buildCost ~/ 2,
+      flow: ActivityFlow.income,
+    );
     _checkSolvency();
   }
 
@@ -515,7 +681,14 @@ class GameEngine {
     }
     state.mortgaged = true;
     currentPlayer.balance += tile.price ~/ 2;
-    _log('${tile.name} mortgaged for ${tile.price ~/ 2}.');
+    _log(
+      '${tile.name} mortgaged for ${tile.price ~/ 2}.',
+      ActivityKind.mortgage,
+      actors: [currentPlayer.name],
+      tile: index,
+      amount: tile.price ~/ 2,
+      flow: ActivityFlow.income,
+    );
     _checkSolvency();
   }
 
@@ -530,7 +703,14 @@ class GameEngine {
     _require(currentPlayer.balance >= cost, 'Not enough cash to unmortgage.');
     currentPlayer.balance -= cost;
     state.mortgaged = false;
-    _log('${spaces[index].name} unmortgaged for $cost.');
+    _log(
+      '${spaces[index].name} unmortgaged for $cost.',
+      ActivityKind.mortgage,
+      actors: [currentPlayer.name],
+      tile: index,
+      amount: cost,
+      flow: ActivityFlow.expense,
+    );
   }
 
   /// Basic two-party exchange; both parties must explicitly agree in the UI.
@@ -600,7 +780,11 @@ class GameEngine {
     for (final i in offer.propertiesTo) {
       properties[i].ownerId = a.id;
     }
-    _log('${a.name} and ${b.name} completed a trade.');
+    _log(
+      '${a.name} and ${b.name} completed a trade.',
+      ActivityKind.trade,
+      actors: [a.name, b.name],
+    );
   }
 
   void _validateTransfer(int index, int ownerId) {
@@ -651,7 +835,11 @@ class GameEngine {
     _pendingDebts.remove(loser.id);
     loser.bankrupt = true;
     loser.inJail = false;
-    _log('${loser.name} declared bankruptcy.');
+    _log(
+      '${loser.name} declared bankruptcy.',
+      ActivityKind.debt,
+      actors: [loser.name],
+    );
     if (players.where((p) => !p.bankrupt).length == 1) {
       _updateWinner();
     } else {
@@ -662,7 +850,11 @@ class GameEngine {
   void _updateWinner() {
     winnerId = players.firstWhere((p) => !p.bankrupt).id;
     phase = TurnPhase.gameOver;
-    _log('${players[winnerId!].name} wins bHiVE Monopoly!');
+    _log(
+      '${players[winnerId!].name} wins bHiVE Monopoly!',
+      ActivityKind.winner,
+      actors: [players[winnerId!].name],
+    );
   }
 
   // Cards: monetary changes, movement, jail, and release-from-jail.
@@ -709,14 +901,18 @@ class GameEngine {
     final deck = fromChance ? _chanceDeck : _communityDeck;
     final cards = fromChance ? _chance : _community;
     if (deck.isEmpty) {
-      _log('Deck is empty.');
+      _log('Deck is empty.', ActivityKind.other);
       _finishLanding();
       return;
     }
     final index = deck.removeAt(0);
     final card = cards[index];
     if (card.kind != _CardType.jailFree) deck.add(index);
-    _log('${fromChance ? 'Fortune' : 'City Chest'}: ${card.title}');
+    _log(
+      '${fromChance ? 'Fortune' : 'City Chest'}: ${card.title}',
+      ActivityKind.card,
+      actors: [currentPlayer.name],
+    );
     switch (card.kind) {
       case _CardType.money:
         if (card.value >= 0) {
@@ -826,6 +1022,7 @@ class GameEngine {
     'chanceDeck': _chanceDeck.toList(),
     'communityDeck': _communityDeck.toList(),
     'log': log.toList(),
+    'activity': activityEvents.map((e) => e.toJson()).toList(),
   };
 
   static GameEngine importSave(Map<String, dynamic> json) {
@@ -964,6 +1161,7 @@ class GameEngine {
       game.log
         ..clear()
         ..addAll((json['log'] as List).cast<String>().take(70));
+      game.restoreActivity(json['activity']);
       return game;
     } on FormatException {
       rethrow;

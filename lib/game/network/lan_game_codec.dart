@@ -51,6 +51,7 @@ class LanGameCodec {
     'winnerId': game.winnerId,
     'debtCreditorId': game.debtCreditorId,
     'log': game.log.toList(),
+    'activity': game.activityEvents.map((e) => e.toJson()).toList(),
   };
 
   static GameEngine decode(Map<String, dynamic> data) {
@@ -132,5 +133,6 @@ class LanGameCodec {
     game.log
       ..clear()
       ..addAll((data['log'] as List).cast<String>());
+    game.restoreActivity(data['activity']);
   }
 }

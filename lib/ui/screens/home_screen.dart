@@ -12,6 +12,7 @@ import '../widgets/player_avatar.dart';
 import 'profile_screen.dart';
 import 'font_settings_screen.dart';
 import 'rules_screen.dart';
+import 'credits_screen.dart';
 import '../../game/engine/game_engine.dart';
 import '../../game/ui/game_setup_screen.dart';
 import '../../game/ui/game_typography.dart';
@@ -606,6 +607,12 @@ class HomeScreen extends ConsumerWidget {
               'Game Experience',
               'গেম অভিজ্ঞতা',
               () => ExperienceSettingsScreen(languageCode: languageCode),
+            ),
+            action(
+              Icons.info_outline_rounded,
+              'Credits',
+              'কৃতজ্ঞতা ও পরিচিতি',
+              () => CreditsScreen(languageCode: languageCode),
             ),
           ],
         ),

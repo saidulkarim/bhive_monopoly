@@ -115,9 +115,11 @@ class _GameSetupScreenState extends State<GameSetupScreen> {
       case BotDifficulty.easy:
         return t.choose('Easy', 'সহজ');
       case BotDifficulty.medium:
-        return t.choose('Medium', 'মাঝারি');
+        return t.choose('Normal', 'স্বাভাবিক');
       case BotDifficulty.hard:
         return t.choose('Hard', 'কঠিন');
+      case BotDifficulty.expert:
+        return t.choose('Expert', 'বিশেষজ্ঞ');
     }
   }
 

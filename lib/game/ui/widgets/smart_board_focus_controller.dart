@@ -45,7 +45,7 @@ class SmartBoardFocusController {
     transform.value = Matrix4Tween(
       begin: _from,
       end: _to,
-    ).lerp(_movement.value);
+    ).lerp(Curves.easeInOutCubic.transform(_movement.value));
   }
 
   void _animateTo(Matrix4 matrix, {required bool reducedMotion}) {

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../engine/game_engine.dart';
 import '../../experience/game_experience_settings.dart';
+import '../../experience/gameplay_motion.dart';
 import '../../experience/token_preferences.dart';
 import '../../experience/player_palette.dart';
 import 'dice_face.dart';
@@ -59,38 +60,34 @@ class AnimatedBoardTokens extends StatelessWidget {
         MediaQuery.maybeOf(context)?.disableAnimations == true;
     return IgnorePointer(
       child: Stack(
+        clipBehavior: Clip.none,
         children: [
           for (final player in game.players)
             if (!player.bankrupt)
-              AnimatedPositioned(
-                key: ValueKey<String>('phase11-token-${player.id}'),
-                duration: reduceMotion
-                    ? Duration.zero
-                    : const Duration(milliseconds: 68),
-                curve: Curves.easeInOut,
-                left: BoardTokenGeometry.tokenTopLeft(
-                  visiblePositions[player.id] ?? player.position,
-                  player.id,
-                ).dx,
-                top: BoardTokenGeometry.tokenTopLeft(
-                  visiblePositions[player.id] ?? player.position,
-                  player.id,
-                ).dy,
+              Positioned(
+                left: 0,
+                top: 0,
                 width: BoardTokenGeometry.tokenExtent,
                 height: BoardTokenGeometry.tokenExtent,
-                child: _TokenLocationAura(
-                  key: ValueKey<String>('player-token-aura-${player.id}'),
-                  color: PlayerPalette.at(player.colorIndex),
-                  isCurrentTurn: player.id == game.currentPlayerId,
+                child: _GlidingToken(
+                  key: ValueKey<String>('phase11-token-${player.id}'),
+                  position: visiblePositions[player.id] ?? player.position,
+                  playerId: player.id,
                   reducedMotion: reduceMotion,
-                  child: BoardToken(
+                  child: _TokenLocationAura(
+                    key: ValueKey<String>('player-token-aura-${player.id}'),
                     color: PlayerPalette.at(player.colorIndex),
-                    playerId: player.id,
-                    styleIndex: TokenPreferences.instance.selectionFor(
-                      player.id,
+                    isCurrentTurn: player.id == game.currentPlayerId,
+                    reducedMotion: reduceMotion,
+                    child: BoardToken(
+                      color: PlayerPalette.at(player.colorIndex),
+                      playerId: player.id,
+                      styleIndex: TokenPreferences.instance.selectionFor(
+                        player.id,
+                      ),
+                      isActive: player.id == game.currentPlayerId,
+                      size: BoardTokenGeometry.tokenExtent,
                     ),
-                    isActive: player.id == game.currentPlayerId,
-                    size: BoardTokenGeometry.tokenExtent,
                   ),
                 ),
               ),
@@ -98,6 +95,83 @@ class AnimatedBoardTokens extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Animate paint translation, not the board Stack layout. The aura and token
+/// remain cached children while the transform ticks independently.
+class _GlidingToken extends StatefulWidget {
+  const _GlidingToken({
+    super.key,
+    required this.position,
+    required this.playerId,
+    required this.reducedMotion,
+    required this.child,
+  });
+
+  final int position;
+  final int playerId;
+  final bool reducedMotion;
+  final Widget child;
+
+  @override
+  State<_GlidingToken> createState() => _GlidingTokenState();
+}
+
+class _GlidingTokenState extends State<_GlidingToken>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _motion = AnimationController(
+    vsync: this,
+    duration: GameplayMotion.tokenGlide,
+    value: 1,
+  );
+  late Offset _from = _target;
+  Offset get _target =>
+      BoardTokenGeometry.tokenTopLeft(widget.position, widget.playerId);
+  late Offset _to = _target;
+
+  Offset get _offset => Offset.lerp(_from, _to, _motion.value)!;
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize before the first possible didUpdateWidget.
+    _from = _target;
+    _to = _target;
+  }
+
+  @override
+  void didUpdateWidget(covariant _GlidingToken oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.position == oldWidget.position &&
+        widget.reducedMotion == oldWidget.reducedMotion) {
+      return;
+    }
+    final current = _offset;
+    _motion.stop();
+    _to = _target;
+    if (widget.reducedMotion ||
+        !GameplayMotion.adjacent(oldWidget.position, widget.position)) {
+      _from = _to;
+      _motion.value = 1;
+    } else {
+      _from = current;
+      _motion.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _motion.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _motion,
+    child: widget.child,
+    builder: (context, child) =>
+        Transform.translate(offset: _offset, child: child),
+  );
 }
 
 /// Always-visible personal halo around EACH player's token. This is an extra

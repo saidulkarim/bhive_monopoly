@@ -9,7 +9,7 @@ import '../models/game_models.dart';
 /// Local, deterministic AI policy. It never mutates the engine: the screen
 /// submits a legal action to the same GameEngine API used by human players.
 /// Pass a seeded Random to make simulations repeatable.
-enum BotDifficulty { easy, medium, hard }
+enum BotDifficulty { easy, medium, hard, expert }
 
 enum BotAction {
   roll,
@@ -23,6 +23,7 @@ enum BotAction {
   build,
   sellBuilding,
   mortgage,
+  unmortgage,
   bankrupt,
   endTurn,
 }
@@ -68,7 +69,9 @@ class BotController {
         if (player.getOutOfJailCards > 0) {
           return const BotDecision(BotAction.useJailCard);
         }
-        if (difficulty == BotDifficulty.hard &&
+        if ((difficulty == BotDifficulty.hard ||
+                difficulty == BotDifficulty.expert &&
+                    _expectedRisk(game, playerId) < 80) &&
             player.balance > _reserve(game, playerId, difficulty) + 50) {
           return const BotDecision(BotAction.payFine);
         }
@@ -76,8 +79,10 @@ class BotController {
       case TurnPhase.purchase:
         return _purchaseDecision(game, playerId, difficulty);
       case TurnPhase.debt:
-        return _debtDecision(game, playerId);
+        return _debtDecision(game, playerId, difficulty);
       case TurnPhase.complete:
+        final recovery = _unmortgageDecision(game, playerId, difficulty);
+        if (recovery != null) return recovery;
         final upgrade = _buildDecision(game, playerId, difficulty);
         return upgrade ?? const BotDecision(BotAction.endTurn);
       case TurnPhase.auction:
@@ -97,6 +102,13 @@ class BotController {
     final completesSet = _completesSet(game, playerId, tile);
     if (difficulty == BotDifficulty.easy && _random.nextDouble() > .58) {
       return const BotDecision(BotAction.auction);
+    }
+    if (difficulty == BotDifficulty.expert) {
+      final strategic = completesSet || _blocksSet(game, playerId, tile);
+      final buffer = strategic ? max(100, reserve ~/ 2) : reserve;
+      return BotDecision(
+        cash >= tile.price + buffer ? BotAction.buy : BotAction.auction,
+      );
     }
     final requiredReserve = (difficulty == BotDifficulty.hard && completesSet)
         ? 110
@@ -128,6 +140,9 @@ class BotController {
       case BotDifficulty.medium:
         premium = completesSet ? 1.08 : .88;
         break;
+      case BotDifficulty.expert:
+        premium = _titleValue(game, playerId, tile) / tile.price;
+        break;
       case BotDifficulty.hard:
         premium = completesSet ? 1.35 : 1.10;
         if (tile.kind == SpaceKind.station) premium += .08;
@@ -138,7 +153,12 @@ class BotController {
     }
     final affordable =
         cash -
-        (completesSet && difficulty == BotDifficulty.hard ? 90 : reserve);
+        (difficulty == BotDifficulty.expert &&
+                (completesSet || _blocksSet(game, playerId, tile))
+            ? max(100, reserve ~/ 2)
+            : completesSet && difficulty == BotDifficulty.hard
+            ? 90
+            : reserve);
     final maxBid = min(affordable, (tile.price * premium).floor());
     if (auction.minimumBid > maxBid) {
       return const BotDecision(BotAction.pass);
@@ -179,7 +199,11 @@ class BotController {
       eligible.add(space);
     }
     if (eligible.isEmpty) return null;
-    if (difficulty == BotDifficulty.hard) {
+    if (difficulty == BotDifficulty.expert) {
+      eligible.sort(
+        (a, b) => _buildValue(game, b).compareTo(_buildValue(game, a)),
+      );
+    } else if (difficulty == BotDifficulty.hard) {
       eligible.sort((a, b) {
         final scoreA =
             _groupPriority(a) +
@@ -193,7 +217,11 @@ class BotController {
     return BotDecision(BotAction.build, spaceIndex: eligible.first.index);
   }
 
-  BotDecision _debtDecision(GameEngine game, int playerId) {
+  BotDecision _debtDecision(
+    GameEngine game,
+    int playerId,
+    BotDifficulty difficulty,
+  ) {
     // Liquidate hotels/houses evenly, then mortgage unimproved titles.
     final buildings = <BoardSpace>[];
     for (final space in game.spaces) {
@@ -211,7 +239,11 @@ class BotController {
       buildings.add(space);
     }
     if (buildings.isNotEmpty) {
-      buildings.sort((a, b) => b.buildCost.compareTo(a.buildCost));
+      buildings.sort(
+        (a, b) => difficulty == BotDifficulty.expert
+            ? _saleLoss(game, a).compareTo(_saleLoss(game, b))
+            : b.buildCost.compareTo(a.buildCost),
+      );
       return BotDecision(
         BotAction.sellBuilding,
         spaceIndex: buildings.first.index,
@@ -231,7 +263,11 @@ class BotController {
       mortgages.add(space);
     }
     if (mortgages.isNotEmpty) {
-      mortgages.sort((a, b) => b.price.compareTo(a.price));
+      mortgages.sort(
+        (a, b) => difficulty == BotDifficulty.expert
+            ? _mortgageLoss(game, a).compareTo(_mortgageLoss(game, b))
+            : b.price.compareTo(a.price),
+      );
       return BotDecision(BotAction.mortgage, spaceIndex: mortgages.first.index);
     }
     return const BotDecision(BotAction.bankrupt);
@@ -243,6 +279,11 @@ class BotController {
         return 400;
       case BotDifficulty.medium:
         return 300;
+      case BotDifficulty.expert:
+        return max(
+          180,
+          min(900, (160 + _expectedRisk(game, playerId) * 3).ceil()),
+        );
       case BotDifficulty.hard:
         // Retain cash for one plausible opponent's largest current rent.
         var highestThreat = 0;
@@ -257,6 +298,147 @@ class BotController {
         }
         return max(220, min(650, highestThreat + 80));
     }
+  }
+
+  // Exact two-dice probabilities for the next ordinary move. Cards and
+  // subsequent doubles are intentionally not predicted.
+  double _expectedRisk(GameEngine game, int playerId) {
+    final player = game.players[playerId];
+    var risk = 0.0;
+    for (var a = 1; a <= 6; a++) {
+      for (var b = 1; b <= 6; b++) {
+        final index = (player.position + a + b) % game.spaces.length;
+        final tile = game.spaces[index];
+        final owner = game.properties[index].ownerId;
+        risk +=
+            tile.tax +
+            (owner != null && owner != playerId
+                ? game.rentFor(index, a + b)
+                : 0);
+      }
+    }
+    return risk / 36;
+  }
+
+  bool _blocksSet(GameEngine game, int playerId, BoardSpace tile) {
+    if (tile.group == null) return false;
+    return game.players.any(
+      (p) => !p.bankrupt && p.id != playerId && _completesSet(game, p.id, tile),
+    );
+  }
+
+  double _titleValue(GameEngine game, int playerId, BoardSpace tile) {
+    var multiplier = 1.0;
+    if (_completesSet(game, playerId, tile)) multiplier += .65;
+    if (_blocksSet(game, playerId, tile)) multiplier += .25;
+    if (tile.group == ColorGroup.orange || tile.group == ColorGroup.red) {
+      multiplier += .15;
+    }
+    if (tile.kind == SpaceKind.station || tile.kind == SpaceKind.utility) {
+      final owned = game.spaces
+          .where(
+            (s) =>
+                s.kind == tile.kind &&
+                s.index != tile.index &&
+                game.properties[s.index].ownerId == playerId,
+          )
+          .length;
+      multiplier += .12 * owned;
+    }
+    return tile.price * multiplier;
+  }
+
+  double _landingWeight(GameEngine game, BoardSpace tile) {
+    var weight = 0.0;
+    for (final p in game.players) {
+      if (p.bankrupt || p.id == game.currentPlayerId) continue;
+      for (var a = 1; a <= 6; a++) {
+        for (var b = 1; b <= 6; b++) {
+          if ((p.position + a + b) % game.spaces.length == tile.index) {
+            weight += 1 / 36;
+          }
+        }
+      }
+    }
+    return .10 + weight;
+  }
+
+  double _buildValue(GameEngine game, BoardSpace tile) {
+    final level = game.properties[tile.index].development;
+    final current = level == 0 ? tile.rents[0] * 2 : tile.rents[level];
+    return (tile.rents[level + 1] - current) *
+        _landingWeight(game, tile) /
+        tile.buildCost;
+  }
+
+  double _saleLoss(GameEngine game, BoardSpace tile) {
+    final level = game.properties[tile.index].development;
+    final previous = level == 1 ? tile.rents[0] * 2 : tile.rents[level - 1];
+    return (tile.rents[level] - previous) *
+        _landingWeight(game, tile) /
+        tile.buildCost;
+  }
+
+  double _mortgageLoss(GameEngine game, BoardSpace tile) =>
+      game.rentFor(tile.index, 7) * _landingWeight(game, tile) / tile.price;
+
+  BotDecision? _unmortgageDecision(
+    GameEngine game,
+    int id,
+    BotDifficulty difficulty,
+  ) {
+    if (difficulty != BotDifficulty.expert) return null;
+    final cash = game.players[id].balance;
+    final reserve = _reserve(game, id, difficulty);
+    final candidates = game.spaces
+        .where(
+          (s) =>
+              s.purchasable &&
+              game.properties[s.index].ownerId == id &&
+              game.properties[s.index].mortgaged &&
+              cash - game.unmortgageCost(s.index) >= reserve,
+        )
+        .toList();
+    candidates.sort(
+      (a, b) => _titleValue(game, id, b).compareTo(_titleValue(game, id, a)),
+    );
+    return candidates.isEmpty
+        ? null
+        : BotDecision(BotAction.unmortgage, spaceIndex: candidates.first.index);
+  }
+
+  /// Recipient approval for the existing human-initiated trade UI.
+  /// Does not mutate the engine or consent on behalf of a human.
+  bool acceptsTrade(
+    GameEngine game,
+    TradeOffer offer,
+    BotDifficulty difficulty,
+  ) {
+    try {
+      game.validateTrade(offer);
+    } on GameRuleException {
+      return false;
+    }
+    final id = offer.toPlayerId;
+    final cash = game.players[id].balance + offer.cashFrom - offer.cashTo;
+    if (cash < _reserve(game, id, difficulty)) return false;
+    double value(int index) => _titleValue(game, id, game.spaces[index]);
+    final incoming =
+        offer.cashFrom +
+        offer.cardsFrom * 50 +
+        offer.propertiesFrom.fold<double>(0, (sum, i) => sum + value(i));
+    final outgoing =
+        offer.cashTo +
+        offer.cardsTo * 50 +
+        offer.propertiesTo.fold<double>(0, (sum, i) => sum + value(i));
+    if (difficulty == BotDifficulty.hard ||
+        difficulty == BotDifficulty.expert) {
+      if (offer.propertiesTo.any(
+        (i) => _completesSet(game, offer.fromPlayerId, game.spaces[i]),
+      ))
+        return false;
+    }
+    return incoming >= outgoing;
   }
 
   bool _completesSet(GameEngine game, int ownerId, BoardSpace tile) {

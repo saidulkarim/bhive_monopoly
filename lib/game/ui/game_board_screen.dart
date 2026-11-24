@@ -7,6 +7,7 @@ import '../../core/ui/app_notices.dart';
 
 import '../ai/bot_controller.dart';
 import '../experience/game_audio.dart';
+import '../experience/gameplay_motion.dart';
 import '../experience/game_experience_settings.dart';
 import '../experience/token_preferences.dart';
 import '../experience/player_palette.dart';
@@ -291,7 +292,14 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
         for (final property in game.properties) property.ownerId,
       ];
       final previousAuctionBid = game.auction?.highBid ?? 0;
-      setState(action);
+      setState(() {
+        action();
+        if (!_busy) {
+          for (final player in game.players) {
+            _visiblePositions[player.id] = player.position;
+          }
+        }
+      });
       if (game.phase == TurnPhase.gameOver &&
           previousPhase != TurnPhase.gameOver) {
         GameAudio.instance.fire(GameSfx.victory);
@@ -460,6 +468,9 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
       case BotAction.mortgage:
         _run(() => game.mortgage(decision.spaceIndex!));
         return;
+      case BotAction.unmortgage:
+        _run(() => game.unmortgage(decision.spaceIndex!));
+        return;
       case BotAction.bankrupt:
         _run(game.declareBankruptcy);
         return;
@@ -476,7 +487,9 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
     final startPosition = game.currentPlayer.position;
     final finalFirst = _random.nextInt(6) + 1;
     final finalSecond = _random.nextInt(6) + 1;
-    final reduceMotion = GameExperienceSettings.instance.reducedMotion;
+    final reduceMotion =
+        GameExperienceSettings.instance.reducedMotion ||
+        MediaQuery.of(context).disableAnimations;
     GameAudio.instance.fire(GameSfx.dice);
     setState(() {
       _busy = true;
@@ -484,7 +497,8 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
     });
     _updateBoard();
     // Dice frames are only visual; the final pair is sent once to GameEngine.
-    for (var i = 0; i < (reduceMotion ? 0 : 8); i++) {
+    for (final delay
+        in reduceMotion ? const <int>[] : GameplayMotion.diceFrames) {
       if (!mounted) return;
       setState(
         () => _dicePreview = DiceRoll(
@@ -493,7 +507,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
         ),
       );
       _updateBoard();
-      await Future<void>.delayed(const Duration(milliseconds: 82));
+      await Future<void>.delayed(Duration(milliseconds: delay));
     }
     if (!mounted) return;
     setState(() {
@@ -510,18 +524,17 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
     }, scheduleBot: false);
     if (applied) {
       final finishPosition = game.players[movingId].position;
-      final travelled = (startPosition + finalFirst + finalSecond) % 40;
-      // Third doubles / jail events teleport rather than walk the dice path.
-      if (!reduceMotion &&
-          travelled == finishPosition &&
-          finishPosition != startPosition) {
-        for (var step = 1; step <= finalFirst + finalSecond; step++) {
+      final path = GameplayMotion.dicePath(
+        startPosition,
+        finishPosition,
+        finalFirst + finalSecond,
+      );
+      if (!reduceMotion) {
+        for (final position in path) {
           if (!mounted) return;
-          setState(
-            () => _visiblePositions[movingId] = (startPosition + step) % 40,
-          );
+          setState(() => _visiblePositions[movingId] = position);
           _updateBoard();
-          await Future<void>.delayed(const Duration(milliseconds: 74));
+          await Future<void>.delayed(GameplayMotion.stepInterval);
         }
       }
       if (!mounted) return;
@@ -626,6 +639,8 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
                     context,
                     text: t,
                     events: List<String>.of(game.log),
+                    players: game.players,
+                    structuredEvents: game.activityEvents,
                   );
                   break;
                 case 'bank':
@@ -697,6 +712,8 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
                               context,
                               text: t,
                               events: List<String>.of(game.log),
+                              players: game.players,
+                              structuredEvents: game.activityEvents,
                             ),
                           ),
                         ),
@@ -756,6 +773,8 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
                           context,
                           text: t,
                           events: List<String>.of(game.log),
+                          players: game.players,
+                          structuredEvents: game.activityEvents,
                         ),
                       ),
                     ),
@@ -1199,6 +1218,8 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
                 context,
                 text: t,
                 events: List<String>.of(game.log),
+                players: game.players,
+                structuredEvents: game.activityEvents,
               ),
               icon: const Icon(Icons.history, size: 16),
               label: Text(
@@ -1507,8 +1528,12 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
               const SizedBox(height: 9),
               Text(
                 t.choose(
-                  'The receiving player must agree before confirming.',
-                  'নিশ্চিত করার আগে ক্রেতার সম্মতি নিন।',
+                  _isBot(targetId)
+                      ? 'The computer will evaluate your offer.'
+                      : 'The receiving player must agree before confirming.',
+                  _isBot(targetId)
+                      ? 'কম্পিউটার আপনার প্রস্তাব মূল্যায়ন করবে।'
+                      : 'নিশ্চিত করার আগে ক্রেতার সম্মতি নিন।',
                 ),
                 style: const TextStyle(fontSize: 12),
               ),
@@ -1521,7 +1546,12 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
             ),
             FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: Text(t.choose('ACCEPT TRADE', 'প্রস্তাব গ্রহণ')),
+              child: Text(
+                t.choose(
+                  _isBot(targetId) ? 'SEND OFFER' : 'ACCEPT TRADE',
+                  _isBot(targetId) ? 'প্রস্তাব পাঠান' : 'প্রস্তাব গ্রহণ',
+                ),
+              ),
             ),
           ],
         ),
@@ -1529,16 +1559,28 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
     );
     if (approved == true && mounted && _actingBotId == null) {
       final cost = int.tryParse(price.text.trim()) ?? -1;
-      _run(
-        () => game.acceptTrade(
-          TradeOffer(
-            fromPlayerId: game.currentPlayerId,
-            toPlayerId: targetId,
-            propertiesFrom: [index],
-            cashTo: cost,
-          ),
-        ),
+      final offer = TradeOffer(
+        fromPlayerId: game.currentPlayerId,
+        toPlayerId: targetId,
+        propertiesFrom: [index],
+        cashTo: cost,
       );
+      final difficulty = widget.botDifficulties[targetId];
+      if (difficulty != null &&
+          !_botController.acceptsTrade(game, offer, difficulty)) {
+        AppNotices.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              t.choose(
+                'Computer player declined the offer.',
+                'কম্পিউটার খেলোয়াড় প্রস্তাবটি প্রত্যাখ্যান করেছে।',
+              ),
+            ),
+          ),
+        );
+      } else {
+        _run(() => game.acceptTrade(offer));
+      }
     }
     price.dispose();
   }

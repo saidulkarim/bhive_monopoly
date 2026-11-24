@@ -7,6 +7,7 @@ import '../../core/ui/app_notices.dart';
 
 import '../engine/game_engine.dart';
 import '../experience/game_audio.dart';
+import '../experience/gameplay_motion.dart';
 import '../experience/game_experience_settings.dart';
 import '../experience/token_preferences.dart';
 import '../experience/board_camera_preset.dart';
@@ -51,6 +52,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
   final Random _animationRandom = Random();
   DiceRoll? _dicePreview;
   bool _diceRolling = false;
+  bool _moveAnimating = false;
   int _lastSequence = 0;
   int _animationEpoch = 0;
   int _seenError = 0;
@@ -72,6 +74,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
   }
 
   bool get _canMakeDecision =>
+      !_moveAnimating &&
       room.connected &&
       !room.paused &&
       room.pendingTrade == null &&
@@ -367,13 +370,14 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
         if (event.dice != null) {
           unawaited(_animate(event, epoch));
         } else {
+          _moveAnimating = false;
           _diceRolling = false;
           _dicePreview = null;
           for (final p in engine.players) {
             _positions[p.id] = p.position;
           }
         }
-      } else if (!_diceRolling) {
+      } else if (!_moveAnimating) {
         for (final p in engine.players) {
           _positions[p.id] = p.position;
         }
@@ -420,8 +424,10 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
   Future<void> _animate(LanMoveEvent event, int epoch) async {
     final roll = event.dice!;
     if (!mounted) return;
-    if (GameExperienceSettings.instance.reducedMotion) {
+    if (GameExperienceSettings.instance.reducedMotion ||
+        MediaQuery.of(context).disableAnimations) {
       setState(() {
+        _moveAnimating = false;
         _diceRolling = false;
         _dicePreview = null;
         final current = game;
@@ -434,6 +440,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
       return;
     }
     setState(() {
+      _moveAnimating = true;
       _dicePreview = roll;
       _diceRolling = true;
       if (event.startPosition != null) {
@@ -441,8 +448,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
       }
     });
     // Dice visual states do not affect the host-selected roll.
-    for (var frame = 0; frame < 7; frame++) {
-      await Future<void>.delayed(const Duration(milliseconds: 70));
+    for (final delay in GameplayMotion.diceFrames) {
       if (!mounted || epoch != _animationEpoch) return;
       setState(
         () => _dicePreview = DiceRoll(
@@ -450,6 +456,8 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
           _animationRandom.nextInt(6) + 1,
         ),
       );
+      _boardUpdates.value++;
+      await Future<void>.delayed(Duration(milliseconds: delay));
     }
     if (!mounted || epoch != _animationEpoch) return;
     setState(() {
@@ -458,16 +466,13 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
     });
     final from = event.startPosition;
     final to = event.endPosition;
-    // Teleports caused by cards/jail are not walked across the board.
-    if (from != null &&
-        to != null &&
-        (from + roll.sum) % 40 == to &&
-        from != to) {
-      for (var step = 1; step <= roll.sum; step++) {
-        await Future<void>.delayed(const Duration(milliseconds: 72));
+    _boardUpdates.value++;
+    if (from != null && to != null) {
+      for (final position in GameplayMotion.dicePath(from, to, roll.sum)) {
         if (!mounted || epoch != _animationEpoch) return;
-        setState(() => _positions[event.actorId] = (from + step) % 40);
+        setState(() => _positions[event.actorId] = position);
         _boardUpdates.value++;
+        await Future<void>.delayed(GameplayMotion.stepInterval);
       }
     }
     if (!mounted || epoch != _animationEpoch) return;
@@ -479,11 +484,14 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
         }
       }
       _dicePreview = null;
+      _moveAnimating = false;
     });
     _boardUpdates.value++;
+    _scheduleDecisionPrompt();
   }
 
   bool get _canUseBoardActions =>
+      !_moveAnimating &&
       room.connected &&
       !room.paused &&
       room.pendingTrade == null &&
@@ -588,6 +596,8 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                       context,
                       text: t,
                       events: List<String>.of(engine.log),
+                      players: engine.players,
+                      structuredEvents: engine.activityEvents,
                     );
                   }
                   break;
@@ -682,6 +692,9 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                           context,
                           text: t,
                           events: List<String>.of(room.game?.log ?? engine.log),
+                          players: (room.game ?? engine).players,
+                          structuredEvents:
+                              (room.game ?? engine).activityEvents,
                         ),
                       );
                       if (wide) {
@@ -952,7 +965,8 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
 
   Widget _controls() {
     final engine = game!;
-    final active = room.isMyTurn && room.pendingTrade == null;
+    final active =
+        !_moveAnimating && room.isMyTurn && room.pendingTrade == null;
     final player = engine.currentPlayer;
     final auction = engine.auction;
     final bidder = auction == null ? null : engine.players[auction.bidderId];
@@ -1601,6 +1615,8 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                 context,
                 text: t,
                 events: List<String>.of(game!.log),
+                players: game!.players,
+                structuredEvents: game!.activityEvents,
               ),
               icon: const Icon(Icons.history, size: 16),
               label: Text(
@@ -1673,7 +1689,11 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
     final tile = engine.spaces[index];
     final property = engine.properties[index];
     final ownedByMe = property.ownerId == room.playerId;
-    final allowed = room.isMyTurn && room.pendingTrade == null && ownedByMe;
+    final allowed =
+        !_moveAnimating &&
+        room.isMyTurn &&
+        room.pendingTrade == null &&
+        ownedByMe;
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,

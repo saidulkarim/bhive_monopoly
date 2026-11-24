@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../engine/game_engine.dart';
 import '../../experience/board_camera_preset.dart';
+import '../../experience/gameplay_motion.dart';
 import '../../experience/game_experience_settings.dart';
 import '../../experience/token_preferences.dart';
 import '../../experience/player_palette.dart';
@@ -133,24 +134,35 @@ class GameBoardView extends StatelessWidget {
                   child: FittedBox(
                     fit: BoxFit.contain,
                     child: TweenAnimationBuilder<double>(
-                      tween: Tween<double>(end: camera.tilt),
-                      duration: settings.reducedMotion
+                      // Interpolate all camera parameters together, rather
+                      // than snapping scale/depth/spin while tilt animates.
+                      key: const ValueKey('board-camera-transition'),
+                      tween: Tween<double>(end: camera.index.toDouble()),
+                      duration:
+                          settings.reducedMotion ||
+                              MediaQuery.of(context).disableAnimations
                           ? Duration.zero
-                          : const Duration(milliseconds: 360),
+                          : GameplayMotion.cameraTransition,
                       curve: Curves.easeInOutCubic,
-                      builder: (context, angle, child) => Transform(
-                        alignment: Alignment.center,
-                        transform: Matrix4.identity()
-                          ..setEntry(3, 2, camera.depth)
-                          ..rotateX(angle)
-                          ..rotateZ(camera.spin)
-                          // An angled board otherwise extends outside its
-                          // square viewport and hides the first/last row.
-                          ..scale(
-                            camera == BoardCameraPreset.topDown ? 1.0 : .79,
-                          ),
-                        child: child,
-                      ),
+                      builder: (context, value, child) {
+                        final lower = value.floor().clamp(0, 2).toInt();
+                        final upper = value.ceil().clamp(0, 2).toInt();
+                        final a = BoardCameraPreset.values[lower];
+                        final b = BoardCameraPreset.values[upper];
+                        final f = (value - lower).clamp(0.0, 1.0).toDouble();
+                        double mix(double x, double y) => x + (y - x) * f;
+                        double scale(BoardCameraPreset p) =>
+                            p == BoardCameraPreset.topDown ? 1.0 : .79;
+                        return Transform(
+                          alignment: Alignment.center,
+                          transform: Matrix4.identity()
+                            ..setEntry(3, 2, mix(a.depth, b.depth))
+                            ..rotateX(mix(a.tilt, b.tilt))
+                            ..rotateZ(mix(a.spin, b.spin))
+                            ..scale(mix(scale(a), scale(b))),
+                          child: child,
+                        );
+                      },
                       child: SizedBox(
                         height: 1000,
                         width: 1000,
