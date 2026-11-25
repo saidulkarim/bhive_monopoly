@@ -35,18 +35,18 @@ bHiVE Monopoly combines classic property-trading gameplay with a modern responsi
 
 ## Development Tools & Technologies
 
-| Category | Technology |
-|---|---|
-| Framework & Language | Flutter, Dart |
-| State Management | Riverpod |
-| Localization | Flutter Localization, intl |
-| Local Storage | SharedPreferences, Path Provider |
-| Multiplayer Communication | WebSocket |
-| 3D Model Rendering | Model Viewer Plus |
-| Testing | Flutter Test |
-| Development Environment | Visual Studio Code, Android SDK, Chrome |
-| Version Control | Git, GitHub |
-| Target Platforms | Android, Web |
+| Category                  | Technology                              |
+| ------------------------- | --------------------------------------- |
+| Framework & Language      | Flutter, Dart                           |
+| State Management          | Riverpod                                |
+| Localization              | Flutter Localization, intl              |
+| Local Storage             | SharedPreferences, Path Provider        |
+| Multiplayer Communication | WebSocket                               |
+| 3D Model Rendering        | Model Viewer Plus                       |
+| Testing                   | Flutter Test                            |
+| Development Environment   | Visual Studio Code, Android SDK, Chrome |
+| Version Control           | Git, GitHub                             |
+| Target Platforms          | Android, Web                            |
 
 ## Developer & Credits
 
@@ -59,4 +59,4 @@ bHiVE Monopoly combines classic property-trading gameplay with a modern responsi
 
 Copyright © 2026 bHiVE. All rights reserved.
 
-bHiVE Monopoly is an independently developed property-trading game and is not affiliated with or endorsed by Hasbro.
+bHiVE Monopoly is an independently developed game.
