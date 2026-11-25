@@ -161,7 +161,7 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
         if (!mounted || room.lastError == null) return;
         AppNotices.of(context).showSnackBar(
           SnackBar(
-            content: Text(room.lastError!),
+            content: Text(t.errorMessage(room.lastError!)),
             backgroundColor: const Color(0xFF9C423C),
           ),
         );
@@ -295,7 +295,10 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
   void _showError(String error) {
     if (!mounted) return;
     AppNotices.of(context).showSnackBar(
-      SnackBar(content: Text(error), backgroundColor: const Color(0xFF9C423C)),
+      SnackBar(
+        content: Text(t.errorMessage(error)),
+        backgroundColor: const Color(0xFF9C423C),
+      ),
     );
   }
 
@@ -656,7 +659,7 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
               ),
             if (_discovery.lastError != null)
               Text(
-                _discovery.lastError!,
+                t.errorMessage(_discovery.lastError!),
                 style: const TextStyle(color: Colors.orangeAccent),
               ),
             const SizedBox(height: 14),

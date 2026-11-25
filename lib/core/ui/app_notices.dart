@@ -137,7 +137,11 @@ class _AppNoticeOverlayState extends State<AppNoticeOverlay> {
                           // which this root-level layer does not have.
                           // Keep an accessible label without Tooltip.
                           Semantics(
-                            label: 'Dismiss notification',
+                            label:
+                                Localizations.localeOf(context).languageCode ==
+                                    'bn'
+                                ? 'বার্তা বন্ধ করুন'
+                                : 'Dismiss notification',
                             button: true,
                             child: IconButton(
                               key: const ValueKey<String>(

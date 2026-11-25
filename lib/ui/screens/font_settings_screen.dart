@@ -63,7 +63,8 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
         _english = FontPreferences.instance.englishFamily;
         _loading = false;
       });
-    } catch (error) {
+    } catch (error, stack) {
+      debugPrint('Font save failed: $error\n$stack');
       if (!mounted) return;
       setState(() {
         _loadError = error.toString();
@@ -92,16 +93,14 @@ class _FontSettingsScreenState extends State<FontSettingsScreen> {
           ),
         ),
       );
-    } catch (error) {
+    } catch (error, stack) {
+      debugPrint('Font save failed: $error\n$stack');
       if (!mounted) return;
       AppNotices.of(context).showSnackBar(
         SnackBar(
           backgroundColor: Colors.red.shade700,
           content: Text(
-            _text(
-              'Could not save fonts. $error',
-              'ফন্ট সংরক্ষণ করা যায়নি। $error',
-            ),
+            _text('Could not save fonts.', 'ফন্ট সংরক্ষণ করা যায়নি।'),
           ),
         ),
       );

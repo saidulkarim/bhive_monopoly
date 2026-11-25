@@ -4,6 +4,8 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../../core/ui/app_notices.dart';
+import '../../core/ui/settled_modal.dart';
+import '../../core/ui/game_diagnostics.dart';
 
 import '../engine/game_engine.dart';
 import '../experience/game_audio.dart';
@@ -62,6 +64,8 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
   bool _boardActionPending = false;
   Timer? _boardActionCooldown;
   bool _decisionOpen = false;
+  bool _tradeDialogOpen = false;
+  bool _propertyModalOpen = false;
   String? _autoDecisionKey;
   BuildContext? _decisionContext;
 
@@ -90,7 +94,12 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // The bid/decision panel opens on portrait, landscape and fullscreen,
       // only on the device of the player authorized to act.
-      if (!mounted || !_needsDecision || !_canMakeDecision || _decisionOpen) {
+      if (!mounted ||
+          !_needsDecision ||
+          !_canMakeDecision ||
+          _decisionOpen ||
+          _propertyModalOpen ||
+          _tradeDialogOpen) {
         return;
       }
       if (_decisionKey != _autoDecisionKey) {
@@ -351,7 +360,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
         if (!mounted || room.lastError == null) return;
         AppNotices.of(context).showSnackBar(
           SnackBar(
-            content: Text(t.moneyInEvent(room.lastError!)),
+            content: Text(t.errorMessage(room.lastError!)),
             backgroundColor: const Color(0xFF9C423C),
           ),
         );
@@ -527,7 +536,31 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
   }
 
   void _send(String action, {int? index, int? amount}) {
-    unawaited(room.sendAction(action, index: index, amount: amount));
+    unawaited(
+      _reportNetworkFailure(
+        room.sendAction(action, index: index, amount: amount),
+      ),
+    );
+  }
+
+  Future<void> _reportNetworkFailure(Future<void> operation) async {
+    try {
+      await operation;
+    } catch (error, stack) {
+      GameDiagnostics.record('multiplayer action', error, stack);
+      if (mounted) {
+        AppNotices.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              t.choose(
+                'Connection action interrupted. Check the current game before trying again.',
+                'সংযোগের কাজ বাধাগ্রস্ত হয়েছে। আবার চেষ্টা করার আগে খেলার অবস্থা যাচাই করুন।',
+              ),
+            ),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -1330,6 +1363,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
   }
 
   Future<void> _openTradeDialog() async {
+    if (_tradeDialogOpen || !mounted) return;
     final engine = game;
     final me = room.playerId;
     if (engine == null ||
@@ -1351,11 +1385,14 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
     int target = recipients.first.id;
     final offered = <int>{};
     final requested = <int>{};
+    final openedTurn = engine.turnNumber;
     final cashFrom = TextEditingController(text: '0');
     final cashTo = TextEditingController(text: '0');
     final owned = _tradeableSpaces(me);
+    _tradeDialogOpen = true;
+    var submitted = false;
     try {
-      await showDialog<void>(
+      await showSettledDialog<void>(
         context: context,
         builder: (dialogContext) => StatefulBuilder(
           builder: (dialogContext, updateDialog) {
@@ -1570,14 +1607,24 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                       );
                       return;
                     }
+                    if (submitted || !mounted) return;
+                    if (!room.isMyTurn ||
+                        room.pendingTrade != null ||
+                        game?.turnNumber != openedTurn) {
+                      Navigator.pop(dialogContext);
+                      return;
+                    }
+                    submitted = true;
                     Navigator.pop(dialogContext);
                     unawaited(
-                      room.sendTradeOffer(
-                        toPlayerId: target,
-                        cashFrom: from,
-                        cashTo: to,
-                        propertiesFrom: offered.toList()..sort(),
-                        propertiesTo: requested.toList()..sort(),
+                      _reportNetworkFailure(
+                        room.sendTradeOffer(
+                          toPlayerId: target,
+                          cashFrom: from,
+                          cashTo: to,
+                          propertiesFrom: offered.toList()..sort(),
+                          propertiesTo: requested.toList()..sort(),
+                        ),
                       ),
                     );
                   },
@@ -1589,8 +1636,10 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
         ),
       );
     } finally {
+      _tradeDialogOpen = false;
       cashFrom.dispose();
       cashTo.dispose();
+      if (mounted) _scheduleDecisionPrompt();
     }
   }
 
@@ -1639,51 +1688,60 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
     ),
   );
 
-  void _showMyProperties() {
+  Future<void> _showMyProperties() async {
+    if (!mounted || _propertyModalOpen) return;
     final engine = game;
     if (engine == null) return;
     final owned = engine.spaces
         .where((s) => engine.properties[s.index].ownerId == room.playerId)
         .toList();
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF1B3031),
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(
-              title: Text(
-                t.choose('My properties', 'আমার সম্পত্তি'),
-                style: const TextStyle(color: kBoardGold),
-              ),
-            ),
-            for (final space in owned)
+    _propertyModalOpen = true;
+    int? selected;
+    try {
+      selected = await showSettledSheet<int>(
+        context: context,
+        backgroundColor: const Color(0xFF1B3031),
+        builder: (ctx) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
               ListTile(
                 title: Text(
-                  t.spaceName(space.index, space.name),
-                  style: const TextStyle(color: Colors.white),
-                ),
-                trailing: const Icon(Icons.chevron_right, color: kBoardGold),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showTile(space.index);
-                },
-              ),
-            if (owned.isEmpty)
-              ListTile(
-                title: Text(
-                  t.choose('No properties yet.', 'এখনো কোনো সম্পত্তি নেই।'),
-                  style: const TextStyle(color: Colors.white70),
+                  t.choose('My properties', 'আমার সম্পত্তি'),
+                  style: const TextStyle(color: kBoardGold),
                 ),
               ),
-          ],
+              for (final space in owned)
+                ListTile(
+                  title: Text(
+                    t.spaceName(space.index, space.name),
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  trailing: const Icon(Icons.chevron_right, color: kBoardGold),
+                  onTap: () {
+                    Navigator.pop(ctx, space.index);
+                  },
+                ),
+              if (owned.isEmpty)
+                ListTile(
+                  title: Text(
+                    t.choose('No properties yet.', 'এখনো কোনো সম্পত্তি নেই।'),
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                ),
+            ],
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      _propertyModalOpen = false;
+      if (mounted) _scheduleDecisionPrompt();
+    }
+    if (mounted && selected != null) await _showTile(selected);
   }
 
-  void _showTile(int index) {
+  Future<void> _showTile(int index) async {
+    if (!mounted || _propertyModalOpen) return;
     final engine = game;
     if (engine == null) return;
     final tile = engine.spaces[index];
@@ -1694,79 +1752,85 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
         room.isMyTurn &&
         room.pendingTrade == null &&
         ownedByMe;
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF1B3031),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            20,
-            18,
-            20,
-            max(MediaQuery.viewInsetsOf(ctx).bottom, 18.0),
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AnimatedDeedEntrance(
-                    child: PropertyDeedCard(
-                      game: engine,
-                      text: t,
-                      spaceIndex: index,
+    _propertyModalOpen = true;
+    try {
+      await showSettledSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: const Color(0xFF1B3031),
+        builder: (ctx) => SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              18,
+              20,
+              max(MediaQuery.viewInsetsOf(ctx).bottom, 18.0),
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedDeedEntrance(
+                      child: PropertyDeedCard(
+                        game: engine,
+                        text: t,
+                        spaceIndex: index,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 15),
-                  // Server still validates every action, including phase and cash.
-                  if (allowed &&
-                      property.development < 5 &&
-                      tile.kind == SpaceKind.street &&
-                      engine.phase != TurnPhase.debt) ...[
-                    _primary(
-                      t.choose('BUILD HOUSE / HOTEL', 'বাড়ি/হোটেল নির্মাণ'),
-                      Icons.add_home_work_outlined,
-                      () {
+                    const SizedBox(height: 15),
+                    // Server still validates every action, including phase and cash.
+                    if (allowed &&
+                        property.development < 5 &&
+                        tile.kind == SpaceKind.street &&
+                        engine.phase != TurnPhase.debt) ...[
+                      _primary(
+                        t.choose('BUILD HOUSE / HOTEL', 'বাড়ি/হোটেল নির্মাণ'),
+                        Icons.add_home_work_outlined,
+                        () {
+                          Navigator.pop(ctx);
+                          _send('build', index: index);
+                        },
+                      ),
+                      const SizedBox(height: 7),
+                    ],
+                    if (allowed && property.development > 0) ...[
+                      _secondary(t.choose('SELL BUILDING', 'ভবন বিক্রি'), () {
                         Navigator.pop(ctx);
-                        _send('build', index: index);
-                      },
-                    ),
-                    const SizedBox(height: 7),
-                  ],
-                  if (allowed && property.development > 0) ...[
-                    _secondary(t.choose('SELL BUILDING', 'ভবন বিক্রি'), () {
-                      Navigator.pop(ctx);
-                      _send('sellBuilding', index: index);
-                    }),
-                    const SizedBox(height: 7),
-                  ],
-                  if (allowed && tile.purchasable) ...[
-                    if (property.mortgaged && engine.phase != TurnPhase.debt)
-                      _secondary(t.choose('UNMORTGAGE', 'বন্ধক ছাড়ান'), () {
-                        Navigator.pop(ctx);
-                        _send('unmortgage', index: index);
-                      })
-                    else if (!property.mortgaged)
-                      _secondary(t.choose('MORTGAGE', 'বন্ধক দিন'), () {
-                        Navigator.pop(ctx);
-                        _send('mortgage', index: index);
+                        _send('sellBuilding', index: index);
                       }),
-                    const SizedBox(height: 9),
+                      const SizedBox(height: 7),
+                    ],
+                    if (allowed && tile.purchasable) ...[
+                      if (property.mortgaged && engine.phase != TurnPhase.debt)
+                        _secondary(t.choose('UNMORTGAGE', 'বন্ধক ছাড়ান'), () {
+                          Navigator.pop(ctx);
+                          _send('unmortgage', index: index);
+                        })
+                      else if (!property.mortgaged)
+                        _secondary(t.choose('MORTGAGE', 'বন্ধক দিন'), () {
+                          Navigator.pop(ctx);
+                          _send('mortgage', index: index);
+                        }),
+                      const SizedBox(height: 9),
+                    ],
+                    _secondary(
+                      t.choose('CLOSE', 'বন্ধ করুন'),
+                      () => Navigator.pop(ctx),
+                    ),
                   ],
-                  _secondary(
-                    t.choose('CLOSE', 'বন্ধ করুন'),
-                    () => Navigator.pop(ctx),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
         ),
-      ),
-    );
+      );
+    } finally {
+      _propertyModalOpen = false;
+      if (mounted) _scheduleDecisionPrompt();
+    }
   }
 
   Future<void> _bankruptcyConfirm() async {

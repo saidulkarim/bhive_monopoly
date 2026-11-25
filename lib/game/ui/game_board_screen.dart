@@ -4,6 +4,8 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../../core/ui/app_notices.dart';
+import '../../core/ui/settled_modal.dart';
+import '../../core/ui/game_diagnostics.dart';
 
 import '../ai/bot_controller.dart';
 import '../experience/game_audio.dart';
@@ -69,6 +71,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
   final ValueNotifier<int> _boardUpdates = ValueNotifier<int>(0);
   final ValueNotifier<int> _decisionRevision = ValueNotifier<int>(0);
   bool _decisionOpen = false;
+  bool _propertyModalOpen = false;
   String? _autoDecisionKey;
   BuildContext? _decisionContext;
 
@@ -97,6 +100,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
       if (!mounted ||
           _busy ||
           _decisionOpen ||
+          _propertyModalOpen ||
           !_needsDecision ||
           _actingBotId != null) {
         return;
@@ -332,7 +336,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
       AppNotices.of(context).hideCurrentSnackBar();
       AppNotices.of(context).showSnackBar(
         SnackBar(
-          content: Text(t.moneyInEvent(error.message)),
+          content: Text(t.errorMessage(error.message)),
           behavior: SnackBarBehavior.floating,
           backgroundColor: const Color(0xFF9C423C),
         ),
@@ -1315,274 +1319,338 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
     ),
   );
 
-  void _showMyProperties() {
-    if (_busy || _actingBotId != null) return;
-    final owned = game.spaces
-        .where((s) => game.properties[s.index].ownerId == game.currentPlayerId)
-        .toList();
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF1B3031),
-      isScrollControlled: true,
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: SizedBox(
-            height: min(MediaQuery.sizeOf(ctx).height * .6, 500.0),
-            child: Column(
-              children: [
-                Text(
-                  t.choose('My properties', 'আমার সম্পত্তি'),
-                  style: TextStyle(
-                    fontFamily: t.font,
-                    color: kBoardGold,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
+  Future<void> _showMyProperties() async {
+    if (!mounted || _busy || _actingBotId != null || _propertyModalOpen) return;
+    _propertyModalOpen = true;
+    int? selected;
+    try {
+      final owned = game.spaces
+          .where(
+            (s) => game.properties[s.index].ownerId == game.currentPlayerId,
+          )
+          .toList();
+      selected = await showSettledSheet<int>(
+        context: context,
+        backgroundColor: const Color(0xFF1B3031),
+        isScrollControlled: true,
+        builder: (ctx) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: SizedBox(
+              height: min(MediaQuery.sizeOf(ctx).height * .6, 500.0),
+              child: Column(
+                children: [
+                  Text(
+                    t.choose('My properties', 'আমার সম্পত্তি'),
+                    style: TextStyle(
+                      fontFamily: t.font,
+                      color: kBoardGold,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-                Expanded(
-                  child: ListView(
-                    children: [
-                      for (final s in owned)
-                        ListTile(
-                          title: Text(
-                            t.spaceName(s.index, s.name),
-                            style: const TextStyle(color: Colors.white),
+                  Expanded(
+                    child: ListView(
+                      children: [
+                        for (final s in owned)
+                          ListTile(
+                            title: Text(
+                              t.spaceName(s.index, s.name),
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                            trailing: const Icon(
+                              Icons.chevron_right,
+                              color: kBoardGold,
+                            ),
+                            onTap: () {
+                              Navigator.pop(ctx, s.index);
+                            },
                           ),
-                          trailing: const Icon(
-                            Icons.chevron_right,
-                            color: kBoardGold,
+                        if (owned.isEmpty)
+                          Text(
+                            t.choose(
+                              'No properties yet.',
+                              'এখনো কোনো সম্পত্তি নেই।',
+                            ),
+                            style: TextStyle(
+                              fontFamily: t.font,
+                              color: Colors.white70,
+                            ),
                           ),
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            _showTile(s.index);
-                          },
-                        ),
-                      if (owned.isEmpty)
-                        Text(
-                          t.choose(
-                            'No properties yet.',
-                            'এখনো কোনো সম্পত্তি নেই।',
-                          ),
-                          style: TextStyle(
-                            fontFamily: t.font,
-                            color: Colors.white70,
-                          ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
-      ),
-    );
+      );
+    } finally {
+      _propertyModalOpen = false;
+    }
+    if (mounted && selected != null) await _showTile(selected);
   }
 
-  void _showTile(int index) {
-    if (_busy || _actingBotId != null) return;
-    final s = game.spaces[index];
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF1B3031),
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (ctx, refreshSheet) {
-          final state = game.properties[index];
-          final ownedByMe = state.ownerId == game.currentPlayerId;
-          void update(void Function() action) {
-            _run(action);
-            refreshSheet(() {});
-          }
+  Future<void> _showTile(int index) async {
+    if (!mounted || _busy || _actingBotId != null || _propertyModalOpen) return;
+    _propertyModalOpen = true;
+    final seller = game.currentPlayerId;
+    final turn = game.turnNumber;
+    try {
+      final s = game.spaces[index];
+      final trade = await showSettledSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: const Color(0xFF1B3031),
+        builder: (sheetContext) => StatefulBuilder(
+          builder: (ctx, refreshSheet) {
+            final state = game.properties[index];
+            final ownedByMe = state.ownerId == game.currentPlayerId;
+            void update(void Function() action) {
+              _run(action);
+              refreshSheet(() {});
+            }
 
-          return SafeArea(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                22,
-                16,
-                22,
-                max(MediaQuery.viewInsetsOf(ctx).bottom, 18.0),
-              ),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 500),
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AnimatedDeedEntrance(
-                        child: PropertyDeedCard(
-                          game: game,
-                          text: t,
-                          spaceIndex: index,
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  22,
+                  16,
+                  22,
+                  max(MediaQuery.viewInsetsOf(ctx).bottom, 18.0),
+                ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 500),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AnimatedDeedEntrance(
+                          child: PropertyDeedCard(
+                            game: game,
+                            text: t,
+                            spaceIndex: index,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 14),
-                      if (ownedByMe &&
-                          s.purchasable &&
-                          game.phase != TurnPhase.gameOver &&
-                          game.phase != TurnPhase.auction) ...[
-                        if (s.kind == SpaceKind.street) ...[
-                          _primary(
-                            t.choose(
-                              'BUILD HOUSE / HOTEL',
-                              'বাড়ি / হোটেল নির্মাণ',
+                        const SizedBox(height: 14),
+                        if (ownedByMe &&
+                            s.purchasable &&
+                            game.phase != TurnPhase.gameOver &&
+                            game.phase != TurnPhase.auction) ...[
+                          if (s.kind == SpaceKind.street) ...[
+                            _primary(
+                              t.choose(
+                                'BUILD HOUSE / HOTEL',
+                                'বাড়ি / হোটেল নির্মাণ',
+                              ),
+                              Icons.add_home_work_outlined,
+                              game.phase == TurnPhase.debt
+                                  ? null
+                                  : () => update(() => game.build(index)),
                             ),
-                            Icons.add_home_work_outlined,
-                            game.phase == TurnPhase.debt
-                                ? null
-                                : () => update(() => game.build(index)),
-                          ),
-                          const SizedBox(height: 8),
-                          _secondary(
-                            t.choose('SELL BUILDING', 'ভবন বিক্রি'),
-                            () => update(() => game.sellBuilding(index)),
-                          ),
-                          const SizedBox(height: 8),
-                        ],
-                        if (state.mortgaged)
-                          _secondary(
-                            t.choose('UNMORTGAGE', 'বন্ধক ছাড়ান'),
-                            game.phase == TurnPhase.debt
-                                ? null
-                                : () => update(() => game.unmortgage(index)),
-                          )
-                        else
-                          _secondary(
-                            t.choose('MORTGAGE', 'বন্ধক দিন'),
-                            () => update(() => game.mortgage(index)),
-                          ),
-                        if (game.phase == TurnPhase.roll ||
-                            game.phase == TurnPhase.complete) ...[
-                          const SizedBox(height: 8),
-                          _secondary(
-                            t.choose(
-                              'TRADE / SELL TO PLAYER',
-                              'অন্য খেলোয়াড়কে বিক্রি',
+                            const SizedBox(height: 8),
+                            _secondary(
+                              t.choose('SELL BUILDING', 'ভবন বিক্রি'),
+                              () => update(() => game.sellBuilding(index)),
                             ),
-                            () {
-                              Navigator.pop(ctx);
-                              _offerTrade(index);
-                            },
-                          ),
+                            const SizedBox(height: 8),
+                          ],
+                          if (state.mortgaged)
+                            _secondary(
+                              t.choose('UNMORTGAGE', 'বন্ধক ছাড়ান'),
+                              game.phase == TurnPhase.debt
+                                  ? null
+                                  : () => update(() => game.unmortgage(index)),
+                            )
+                          else
+                            _secondary(
+                              t.choose('MORTGAGE', 'বন্ধক দিন'),
+                              () => update(() => game.mortgage(index)),
+                            ),
+                          if (game.phase == TurnPhase.roll ||
+                              game.phase == TurnPhase.complete) ...[
+                            const SizedBox(height: 8),
+                            _secondary(
+                              t.choose(
+                                'TRADE / SELL TO PLAYER',
+                                'অন্য খেলোয়াড়কে বিক্রি',
+                              ),
+                              () {
+                                Navigator.pop(ctx, true);
+                              },
+                            ),
+                          ],
                         ],
+                        const SizedBox(height: 12),
+                        _secondary(
+                          t.choose('CLOSE', 'বন্ধ করুন'),
+                          () => Navigator.pop(ctx),
+                        ),
                       ],
-                      const SizedBox(height: 12),
-                      _secondary(
-                        t.choose('CLOSE', 'বন্ধ করুন'),
-                        () => Navigator.pop(ctx),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          );
-        },
-      ),
-    );
+            );
+          },
+        ),
+      );
+      if (mounted &&
+          trade == true &&
+          game.currentPlayerId == seller &&
+          game.turnNumber == turn) {
+        await _offerTrade(index);
+      }
+    } finally {
+      _propertyModalOpen = false;
+      if (mounted) _scheduleDecisionPrompt();
+    }
   }
 
   Future<void> _offerTrade(int index) async {
+    final seller = game.currentPlayerId;
+    final turn = game.turnNumber;
     final others = game.players
         .where((p) => !p.bankrupt && p.id != game.currentPlayerId)
         .toList();
     if (others.isEmpty) return;
     var targetId = others.first.id;
     final price = TextEditingController(text: '${game.spaces[index].price}');
-    final approved = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (ctx, refresh) => AlertDialog(
-          title: Text(
-            t.choose('Offer property trade', 'সম্পত্তি বিনিময়ের প্রস্তাব'),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(t.spaceName(index, game.spaces[index].name)),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<int>(
-                initialValue: targetId,
-                decoration: InputDecoration(
-                  labelText: t.choose('Buyer', 'ক্রেতা'),
+    try {
+      final approved = await showSettledDialog<bool>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (ctx, refresh) => AlertDialog(
+            title: Text(
+              t.choose('Offer property trade', 'সম্পত্তি বিনিময়ের প্রস্তাব'),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(t.spaceName(index, game.spaces[index].name)),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<int>(
+                  initialValue: targetId,
+                  decoration: InputDecoration(
+                    labelText: t.choose('Buyer', 'ক্রেতা'),
+                  ),
+                  items: [
+                    for (final p in others)
+                      DropdownMenuItem(value: p.id, child: Text(p.name)),
+                  ],
+                  onChanged: (id) {
+                    if (id != null) refresh(() => targetId = id);
+                  },
                 ),
-                items: [
-                  for (final p in others)
-                    DropdownMenuItem(value: p.id, child: Text(p.name)),
-                ],
-                onChanged: (id) {
-                  if (id != null) refresh(() => targetId = id);
-                },
+                const SizedBox(height: 10),
+                TextField(
+                  controller: price,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: t.choose('Offer price', 'প্রস্তাবিত মূল্য'),
+                    prefixText: t.money(0).substring(0, 1),
+                  ),
+                ),
+                const SizedBox(height: 9),
+                Text(
+                  t.choose(
+                    _isBot(targetId)
+                        ? 'The computer will evaluate your offer.'
+                        : 'The receiving player must agree before confirming.',
+                    _isBot(targetId)
+                        ? 'কম্পিউটার আপনার প্রস্তাব মূল্যায়ন করবে।'
+                        : 'নিশ্চিত করার আগে ক্রেতার সম্মতি নিন।',
+                  ),
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(t.choose('CANCEL', 'বাতিল')),
               ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: price,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: t.choose('Offer price', 'প্রস্তাবিত মূল্য'),
-                  prefixText: t.money(0).substring(0, 1),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: Text(
+                  t.choose(
+                    _isBot(targetId) ? 'SEND OFFER' : 'ACCEPT TRADE',
+                    _isBot(targetId) ? 'প্রস্তাব পাঠান' : 'প্রস্তাব গ্রহণ',
+                  ),
                 ),
-              ),
-              const SizedBox(height: 9),
-              Text(
-                t.choose(
-                  _isBot(targetId)
-                      ? 'The computer will evaluate your offer.'
-                      : 'The receiving player must agree before confirming.',
-                  _isBot(targetId)
-                      ? 'কম্পিউটার আপনার প্রস্তাব মূল্যায়ন করবে।'
-                      : 'নিশ্চিত করার আগে ক্রেতার সম্মতি নিন।',
-                ),
-                style: const TextStyle(fontSize: 12),
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(t.choose('CANCEL', 'বাতিল')),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(
-                t.choose(
-                  _isBot(targetId) ? 'SEND OFFER' : 'ACCEPT TRADE',
-                  _isBot(targetId) ? 'প্রস্তাব পাঠান' : 'প্রস্তাব গ্রহণ',
-                ),
-              ),
-            ),
-          ],
         ),
-      ),
-    );
-    if (approved == true && mounted && _actingBotId == null) {
-      final cost = int.tryParse(price.text.trim()) ?? -1;
-      final offer = TradeOffer(
-        fromPlayerId: game.currentPlayerId,
-        toPlayerId: targetId,
-        propertiesFrom: [index],
-        cashTo: cost,
       );
-      final difficulty = widget.botDifficulties[targetId];
-      if (difficulty != null &&
-          !_botController.acceptsTrade(game, offer, difficulty)) {
+      if (approved != true || !mounted) return;
+      if (_actingBotId != null ||
+          game.currentPlayerId != seller ||
+          game.turnNumber != turn) {
         AppNotices.of(context).showSnackBar(
           SnackBar(
             content: Text(
               t.choose(
-                'Computer player declined the offer.',
-                'কম্পিউটার খেলোয়াড় প্রস্তাবটি প্রত্যাখ্যান করেছে।',
+                'The turn changed. Open the trade again.',
+                'পালা পরিবর্তিত হয়েছে। আবার বিনিময়ের প্রস্তাব খুলুন।',
               ),
             ),
           ),
         );
-      } else {
-        _run(() => game.acceptTrade(offer));
+        return;
       }
+      {
+        final cost = int.tryParse(price.text.trim()) ?? -1;
+        final offer = TradeOffer(
+          fromPlayerId: seller,
+          toPlayerId: targetId,
+          propertiesFrom: [index],
+          cashTo: cost,
+        );
+        try {
+          game.validateTrade(offer);
+        } on GameRuleException catch (error) {
+          AppNotices.of(context).showSnackBar(
+            SnackBar(content: Text(t.errorMessage(error.message))),
+          );
+          return;
+        }
+        final difficulty = widget.botDifficulties[targetId];
+        if (difficulty != null &&
+            !_botController.acceptsTrade(game, offer, difficulty)) {
+          AppNotices.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                t.choose(
+                  'Computer player declined the offer.',
+                  'কম্পিউটার খেলোয়াড় প্রস্তাবটি প্রত্যাখ্যান করেছে।',
+                ),
+              ),
+            ),
+          );
+        } else {
+          _run(() => game.acceptTrade(offer));
+        }
+      }
+    } catch (error, stack) {
+      GameDiagnostics.record('offline trade', error, stack);
+      if (mounted) {
+        AppNotices.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              t.choose(
+                'Trade interrupted. Check cash and ownership before trying again.',
+                'বিনিময় বাধাগ্রস্ত হয়েছে। আবার চেষ্টা করার আগে টাকা ও মালিকানা যাচাই করুন।',
+              ),
+            ),
+          ),
+        );
+      }
+    } finally {
+      price.dispose();
     }
-    price.dispose();
   }
 
   Future<void> _confirmBankruptcy() async {

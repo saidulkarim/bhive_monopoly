@@ -10,6 +10,165 @@ class GameText {
   bool get bn => languageCode == 'bn';
   String choose(String english, String bangla) => bn ? bangla : english;
 
+  /// Localize errors at the display boundary, not in saved/network data.
+  String errorMessage(String raw) {
+    final message = raw.trim().replaceFirst(
+      RegExp(
+        r'^(?:Bad state|Invalid argument(?:\(s\))?|FormatException|Unsupported operation|Exception):\s*',
+      ),
+      '',
+    );
+    final bid = RegExp(r'^Minimum bid: (\d+)\.?$').firstMatch(message);
+    if (bid != null) {
+      final amount = int.tryParse(bid.group(1)!);
+      if (amount != null) {
+        return '${choose('Minimum bid', 'ন্যূনতম দর')}: ${money(amount)}';
+      }
+    }
+    if (message.startsWith('Action unavailable during ')) {
+      return choose(
+        'This action is not available right now.',
+        'এখন এই কাজটি করা যাবে না।',
+      );
+    }
+    final translated = _errorMessages[message];
+    if (translated != null) return bn ? translated : message;
+    if (message.startsWith('Bluetooth connection failed:')) {
+      return choose(
+        'Bluetooth connection failed. Try again.',
+        'ব্লুটুথ সংযোগ ব্যর্থ হয়েছে। আবার চেষ্টা করুন।',
+      );
+    }
+    if (message.startsWith('Could not connect to ')) {
+      return choose(
+        'Could not connect to the host.',
+        'হোস্টের সঙ্গে সংযোগ স্থাপন করা যায়নি।',
+      );
+    }
+    if (message.startsWith('Wi-Fi ') ||
+        message.startsWith('Cannot scan local Wi-Fi')) {
+      return choose(
+        'Wi-Fi discovery is unavailable. Try again or enter the host IP.',
+        'ওয়াই-ফাই রুম খোঁজা যাচ্ছে না। আবার চেষ্টা করুন অথবা হোস্টের আইপি লিখুন।',
+      );
+    }
+    return choose(
+      'This action could not be completed. Please try again.',
+      'কাজটি সম্পন্ন করা যায়নি। আবার চেষ্টা করুন।',
+    );
+  }
+
+  static const _errorMessages = <String, String>{
+    "Choose 2–6 players with valid names.":
+        "সঠিক নামসহ ২–৬ জন খেলোয়াড় নির্বাচন করুন।",
+    "Player colours must be distinct.": "খেলোয়াড়দের রং আলাদা হতে হবে।",
+    "Both dice must be between 1 and 6.": "উভয় পাশার মান ১ থেকে ৬ হতে হবে।",
+    "Property already owned.": "সম্পত্তিটির ইতিমধ্যে মালিক আছে।",
+    "Not enough cash. Start an auction.": "পর্যাপ্ত টাকা নেই। নিলাম শুরু করুন।",
+    "Bidder cannot afford that bid.": "দরদাতার কাছে পর্যাপ্ত টাকা নেই।",
+    "No jail release card.": "জেল থেকে মুক্তির কার্ড নেই।",
+    "Invalid payment amount.": "পরিশোধের পরিমাণ সঠিক নয়।",
+    "Invalid board space.": "বোর্ডের ঘরটি সঠিক নয়।",
+    "This tile cannot be managed.": "এই ঘরটি পরিচালনা করা যাবে না।",
+    "You do not own this property.": "আপনি এই সম্পত্তির মালিক নন।",
+    "Property management is unavailable now.":
+        "এখন সম্পত্তি পরিচালনা করা যাবে না।",
+    "Resolve your debt first.": "আগে ঋণ পরিশোধ করুন।",
+    "Only streets can have buildings.":
+        "শুধু রাস্তার সম্পত্তিতে ভবন নির্মাণ করা যায়।",
+    "Property already has a hotel.": "সম্পত্তিতে ইতিমধ্যে হোটেল আছে।",
+    "Own the complete color group to build.":
+        "নির্মাণের জন্য একই রঙের সব সম্পত্তির মালিক হতে হবে।",
+    "Unmortgage every property in this group first.":
+        "আগে এই গ্রুপের সব সম্পত্তির বন্ধক ছাড়ান।",
+    "Build evenly across the group.":
+        "গ্রুপের সম্পত্তিগুলোতে সমানভাবে নির্মাণ করুন।",
+    "Not enough cash.": "পর্যাপ্ত টাকা নেই।",
+    "Bank has no available hotels.": "ব্যাংকে কোনো হোটেল অবশিষ্ট নেই।",
+    "Bank has no available houses.": "ব্যাংকে কোনো বাড়ি অবশিষ্ট নেই।",
+    "No building to sell.": "বিক্রির জন্য কোনো ভবন নেই।",
+    "Sell buildings evenly across the color group.":
+        "একই রঙের গ্রুপে সমানভাবে ভবন বিক্রি করুন।",
+    "Bank must have 4 houses to exchange for this hotel.":
+        "হোটেল বদলের জন্য ব্যাংকে ৪টি বাড়ি থাকতে হবে।",
+    "Already mortgaged.": "ইতিমধ্যে বন্ধক দেওয়া হয়েছে।",
+    "Sell buildings first.": "আগে ভবন বিক্রি করুন।",
+    "Sell every building in the color group first.":
+        "আগে একই রঙের গ্রুপের সব ভবন বিক্রি করুন।",
+    "This property is not mortgaged.": "সম্পত্তিটি বন্ধক দেওয়া নেই।",
+    "Not enough cash to unmortgage.": "বন্ধক ছাড়ানোর জন্য পর্যাপ্ত টাকা নেই।",
+    "Trades are allowed between rolls.":
+        "পাশা নিক্ষেপের মধ্যবর্তী সময়ে বিনিময় করা যায়।",
+    "Trade requires two different players.":
+        "বিনিময়ের জন্য দুজন আলাদা খেলোয়াড় প্রয়োজন।",
+    "Invalid player.": "খেলোয়াড় সঠিক নয়।",
+    "Bankrupt players cannot trade.": "দেউলিয়া খেলোয়াড় বিনিময় করতে পারবেন না।",
+    "Invalid trade amount or insufficient cash.":
+        "বিনিময়ের পরিমাণ সঠিক নয় অথবা পর্যাপ্ত টাকা নেই।",
+    "Insufficient jail cards.": "পর্যাপ্ত জেলমুক্তির কার্ড নেই।",
+    "Duplicate tile in trade.": "বিনিময়ে একই সম্পত্তি একাধিকবার রয়েছে।",
+    "Trade property is not owned by the sender.":
+        "প্রেরক বিনিময়ের সম্পত্তিটির মালিক নন।",
+    "Unmortgage before trading.": "বিনিময়ের আগে বন্ধক ছাড়ান।",
+    "Sell every building in the color group before trading.":
+        "বিনিময়ের আগে একই রঙের গ্রুপের সব ভবন বিক্রি করুন।",
+    "Invalid or inactive player.": "খেলোয়াড় সঠিক নয় অথবা সক্রিয় নেই।",
+    "This game is finished.": "এই খেলা শেষ হয়েছে।",
+    "It is not your auction bid.": "এখন আপনার দর দেওয়ার পালা নয়।",
+    "Wait for your turn.": "আপনার পালার জন্য অপেক্ষা করুন।",
+    "A bid amount is required.": "দরের পরিমাণ লিখুন।",
+    "Unsupported network action.": "নেটওয়ার্কে এই কাজটি সমর্থিত নয়।",
+    "Invalid property index.": "সম্পত্তির নম্বর সঠিক নয়।",
+    "Invalid action.": "কাজটি সঠিক নয়।",
+    "Respond to the pending trade first.": "আগে অপেক্ষমাণ বিনিময়ের উত্তর দিন।",
+    "Invalid command parameters.": "কাজটির তথ্য সঠিক নয়।",
+    "The trade recipient is unavailable.": "বিনিময়ের প্রাপক এখন উপলব্ধ নেই।",
+    "Unknown trade action.": "বিনিময়ের কাজটি পরিচিত নয়।",
+    "Invalid trade response.": "বিনিময়ের উত্তর সঠিক নয়।",
+    "Respond to the existing trade first.": "আগে বিদ্যমান বিনিময়ের উত্তর দিন।",
+    "Only the active player can offer a trade.":
+        "শুধু সক্রিয় খেলোয়াড় বিনিময়ের প্রস্তাব দিতে পারেন।",
+    "Trade must exchange something.":
+        "বিনিময়ের জন্য সম্পত্তি বা টাকা নির্বাচন করুন।",
+    "Trade is no longer available.": "বিনিময়ের প্রস্তাবটি আর উপলব্ধ নেই।",
+    "Only the recipient can respond.": "শুধু প্রাপক উত্তর দিতে পারেন।",
+    "Only the proposer can cancel.": "শুধু প্রস্তাবদাতা বাতিল করতে পারেন।",
+    "Room unavailable or waiting for another player to reconnect.":
+        "রুম উপলব্ধ নেই অথবা অন্য খেলোয়াড়ের পুনঃসংযোগের অপেক্ষায় আছে।",
+    "Connection failed. Rejoin the room.":
+        "সংযোগ ব্যর্থ হয়েছে। আবার রুমে যোগ দিন।",
+    "Host connection lost. Reconnect to continue.":
+        "হোস্টের সংযোগ বিচ্ছিন্ন হয়েছে। খেলা চালাতে পুনঃসংযোগ করুন।",
+    "Unknown network error.": "নেটওয়ার্কে অজানা সমস্যা হয়েছে।",
+    "Received an invalid game update from the host.":
+        "হোস্ট থেকে ভুল খেলার তথ্য এসেছে।",
+    "Cannot join relay room.": "রিলে রুমে যোগ দেওয়া যাচ্ছে না।",
+    "Relay disconnected. The host must create a new room.":
+        "রিলে সংযোগ বিচ্ছিন্ন হয়েছে। হোস্টকে নতুন রুম তৈরি করতে হবে।",
+    "At least two connected players are required.":
+        "অন্তত দুজন সংযুক্ত খেলোয়াড় প্রয়োজন।",
+    "Enter a name and choose 2–6 player slots.":
+        "নাম লিখুন এবং ২–৬ জন খেলোয়াড়ের স্থান নির্বাচন করুন।",
+    "Name, host IP and room PIN are required.":
+        "নাম, হোস্টের আইপি ও রুমের পিন প্রয়োজন।",
+    "Enter a player name and 6-digit room PIN.":
+        "খেলোয়াড়ের নাম ও ৬ সংখ্যার রুম পিন লিখুন।",
+    "Please enter your player name.": "আপনার নাম লিখুন।",
+    "Enter the 8-character room code.": "৮ অক্ষরের রুম কোড লিখুন।",
+    "Bluetooth hosting is available on Android only.":
+        "শুধু অ্যান্ড্রয়েডে ব্লুটুথ হোস্ট করা যায়।",
+    "Bluetooth joining is available on Android only.":
+        "শুধু অ্যান্ড্রয়েডে ব্লুটুথের মাধ্যমে যোগ দেওয়া যায়।",
+    "Allow Nearby devices permission to use Bluetooth.":
+        "ব্লুটুথ ব্যবহারের জন্য নিকটবর্তী ডিভাইসের অনুমতি দিন।",
+    "Turn on Bluetooth in Android settings and try again.":
+        "অ্যান্ড্রয়েড সেটিংসে ব্লুটুথ চালু করে আবার চেষ্টা করুন।",
+    "Bluetooth connection closed.": "ব্লুটুথ সংযোগ বন্ধ হয়েছে।",
+    "Invalid Bluetooth device address.": "ব্লুটুথ ডিভাইসের ঠিকানা সঠিক নয়।",
+    "LAN hosting requires Android or a desktop OS.":
+        "স্থানীয় নেটওয়ার্কে হোস্ট করতে অ্যান্ড্রয়েড বা ডেস্কটপ প্রয়োজন।",
+  };
+
   String digits(String input) {
     if (!bn) return input;
     const latin = '0123456789';
