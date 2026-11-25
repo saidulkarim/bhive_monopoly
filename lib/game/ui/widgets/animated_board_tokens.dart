@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -56,7 +58,7 @@ class AnimatedBoardTokens extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final reduceMotion =
-        GameExperienceSettings.instance.reducedMotion ||
+        GameExperienceSettings.instance.effectiveReducedMotion ||
         MediaQuery.maybeOf(context)?.disableAnimations == true;
     return IgnorePointer(
       child: Stack(
@@ -79,6 +81,9 @@ class AnimatedBoardTokens extends StatelessWidget {
                     color: PlayerPalette.at(player.colorIndex),
                     isCurrentTurn: player.id == game.currentPlayerId,
                     reducedMotion: reduceMotion,
+                    pulseCycles:
+                        GameExperienceSettings.instance.powerProfile.glowCycles,
+                    position: visiblePositions[player.id] ?? player.position,
                     child: BoardToken(
                       color: PlayerPalette.at(player.colorIndex),
                       playerId: player.id,
@@ -182,12 +187,16 @@ class _TokenLocationAura extends StatefulWidget {
     required this.color,
     required this.isCurrentTurn,
     required this.reducedMotion,
+    required this.pulseCycles,
+    required this.position,
     required this.child,
   });
 
   final Color color;
   final bool isCurrentTurn;
   final bool reducedMotion;
+  final int pulseCycles;
+  final int position;
   final Widget child;
 
   @override
@@ -199,8 +208,10 @@ class _TokenLocationAuraState extends State<_TokenLocationAura>
   late final AnimationController _pulse = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1800),
-    value: .30,
+    value: 1,
   );
+
+  bool? _allowed;
 
   @override
   void didChangeDependencies() {
@@ -211,17 +222,30 @@ class _TokenLocationAuraState extends State<_TokenLocationAura>
   @override
   void didUpdateWidget(covariant _TokenLocationAura oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.reducedMotion != widget.reducedMotion) _syncMotion();
+    if (oldWidget.reducedMotion != widget.reducedMotion ||
+        oldWidget.pulseCycles != widget.pulseCycles ||
+        oldWidget.position != widget.position ||
+        oldWidget.color != widget.color ||
+        oldWidget.isCurrentTurn != widget.isCurrentTurn) {
+      _syncMotion(restart: true);
+    }
   }
 
-  void _syncMotion() {
-    final disabled =
-        widget.reducedMotion ||
-        (MediaQuery.maybeOf(context)?.disableAnimations ?? false);
-    if (disabled) {
+  void _syncMotion({bool restart = false}) {
+    final allowed =
+        !widget.reducedMotion &&
+        widget.pulseCycles > 0 &&
+        TickerMode.of(context) &&
+        ModalRoute.isCurrentOf(context) != false &&
+        !(MediaQuery.maybeOf(context)?.disableAnimations ?? false);
+    final changed = _allowed != allowed;
+    _allowed = allowed;
+    if (!allowed) {
       _pulse.stop();
-    } else if (!_pulse.isAnimating) {
-      _pulse.repeat();
+      _pulse.value = 1;
+    } else if (changed || restart) {
+      _pulse.duration = Duration(milliseconds: 1800 * widget.pulseCycles);
+      _pulse.forward(from: 0);
     }
   }
 
@@ -250,7 +274,9 @@ class _TokenLocationAuraState extends State<_TokenLocationAura>
                   painter: _TokenAuraPainter(
                     color: widget.color,
                     active: widget.isCurrentTurn,
-                    progress: widget.reducedMotion ? .55 : _pulse.value,
+                    progress: _allowed != true || _pulse.value >= 1
+                        ? .55
+                        : (_pulse.value * widget.pulseCycles) % 1,
                   ),
                 ),
               ),

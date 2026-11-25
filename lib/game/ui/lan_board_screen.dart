@@ -424,7 +424,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
   Future<void> _animate(LanMoveEvent event, int epoch) async {
     final roll = event.dice!;
     if (!mounted) return;
-    if (GameExperienceSettings.instance.reducedMotion ||
+    if (GameExperienceSettings.instance.effectiveReducedMotion ||
         MediaQuery.of(context).disableAnimations) {
       setState(() {
         _moveAnimating = false;

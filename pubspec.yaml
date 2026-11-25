@@ -23,6 +23,7 @@ dependencies:
   model_viewer_plus: 1.10.0
   package_info_plus: ^10.2.2
   url_launcher: ^6.3.3
+  pdfx: ^2.11.0
 
 dev_dependencies:
   flutter_test:
@@ -37,6 +38,7 @@ flutter:
   assets:
     - assets/audio/
     - assets/models/
+    - assets/guides/
     - assets/icons/app_icon.png
 
   fonts:

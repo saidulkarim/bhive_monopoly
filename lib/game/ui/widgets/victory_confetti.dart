@@ -25,7 +25,7 @@ class _VictoryConfettiState extends State<VictoryConfetti>
   @override
   void initState() {
     super.initState();
-    if (!GameExperienceSettings.instance.reducedMotion) {
+    if (!GameExperienceSettings.instance.effectiveReducedMotion) {
       _controller.forward();
     }
   }

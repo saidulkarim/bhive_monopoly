@@ -139,7 +139,7 @@ class GameBoardView extends StatelessWidget {
                       key: const ValueKey('board-camera-transition'),
                       tween: Tween<double>(end: camera.index.toDouble()),
                       duration:
-                          settings.reducedMotion ||
+                          settings.effectiveReducedMotion ||
                               MediaQuery.of(context).disableAnimations
                           ? Duration.zero
                           : GameplayMotion.cameraTransition,
@@ -420,8 +420,13 @@ class GameBoardView extends StatelessWidget {
                           PlayerPalette.at(player.colorIndex),
                       ],
                       isCurrentTurn: isCurrentPosition,
-                      reducedMotion:
-                          GameExperienceSettings.instance.reducedMotion,
+                      reducedMotion: GameExperienceSettings
+                          .instance
+                          .effectiveReducedMotion,
+                      pulseCycles: GameExperienceSettings
+                          .instance
+                          .powerProfile
+                          .glowCycles,
                     ),
                   ),
                 // The four corner icons occupy the same center slot as the

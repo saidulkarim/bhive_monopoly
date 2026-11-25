@@ -1,8 +1,9 @@
-// ignore_for_file: unnecessary_underscores
+// ignore_for_file: deprecated_member_use, unnecessary_underscores
 
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 
 /// A conspicuous but non-blocking position highlight for EVERY player.
 ///
@@ -17,6 +18,7 @@ class ActivePositionGlow extends StatefulWidget {
     this.colors = const <Color>[],
     this.isCurrentTurn = true,
     this.reducedMotion = false,
+    this.pulseCycles = 1,
   });
 
   /// Primary occupant / current player colour (kept for Phase 13.4 callers).
@@ -26,6 +28,7 @@ class ActivePositionGlow extends StatefulWidget {
   final List<Color> colors;
   final bool isCurrentTurn;
   final bool reducedMotion;
+  final int pulseCycles;
 
   @override
   State<ActivePositionGlow> createState() => _ActivePositionGlowState();
@@ -36,8 +39,10 @@ class _ActivePositionGlowState extends State<ActivePositionGlow>
   late final AnimationController _controller = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 2100),
-    value: .20,
+    value: 1,
   );
+
+  bool? _allowed;
 
   @override
   void didChangeDependencies() {
@@ -48,17 +53,31 @@ class _ActivePositionGlowState extends State<ActivePositionGlow>
   @override
   void didUpdateWidget(covariant ActivePositionGlow oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.reducedMotion != oldWidget.reducedMotion) _syncMotion();
+    if (widget.reducedMotion != oldWidget.reducedMotion ||
+        widget.pulseCycles != oldWidget.pulseCycles ||
+        widget.isCurrentTurn != oldWidget.isCurrentTurn ||
+        widget.color != oldWidget.color ||
+        !listEquals(widget.colors, oldWidget.colors)) {
+      _syncMotion(restart: true);
+    }
   }
 
-  void _syncMotion() {
-    final disabled =
-        widget.reducedMotion ||
-        (MediaQuery.maybeOf(context)?.disableAnimations ?? false);
-    if (disabled) {
+  void _syncMotion({bool restart = false}) {
+    final allowed =
+        !widget.reducedMotion &&
+        widget.pulseCycles > 0 &&
+        TickerMode.of(context) &&
+        ModalRoute.isCurrentOf(context) != false &&
+        !(MediaQuery.maybeOf(context)?.disableAnimations ?? false);
+    final changed = _allowed != allowed;
+    _allowed = allowed;
+    if (!allowed) {
       _controller.stop();
-    } else if (!_controller.isAnimating) {
-      _controller.repeat();
+      _controller.value = 1;
+    } else if (changed || restart) {
+      // A finite pulse, never an idle frame loop.
+      _controller.duration = Duration(milliseconds: 2100 * widget.pulseCycles);
+      _controller.forward(from: 0);
     }
   }
 
@@ -70,9 +89,6 @@ class _ActivePositionGlowState extends State<ActivePositionGlow>
 
   @override
   Widget build(BuildContext context) {
-    final disabled =
-        widget.reducedMotion ||
-        (MediaQuery.maybeOf(context)?.disableAnimations ?? false);
     return IgnorePointer(
       child: RepaintBoundary(
         child: AnimatedBuilder(
@@ -84,8 +100,8 @@ class _ActivePositionGlowState extends State<ActivePositionGlow>
                   : widget.colors,
               primary: widget.color,
               isCurrentTurn: widget.isCurrentTurn,
-              progress: _controller.value,
-              staticEffect: disabled,
+              progress: (_controller.value * widget.pulseCycles) % 1,
+              staticEffect: _allowed != true || _controller.value >= 1,
             ),
             child: const SizedBox.expand(),
           ),

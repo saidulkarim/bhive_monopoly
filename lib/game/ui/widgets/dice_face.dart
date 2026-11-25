@@ -187,7 +187,7 @@ class _RollingDiceFaceState extends State<RollingDiceFace>
   );
 
   bool get _motionAllowed =>
-      !GameExperienceSettings.instance.reducedMotion &&
+      !GameExperienceSettings.instance.effectiveReducedMotion &&
       !(MediaQuery.maybeOf(context)?.disableAnimations ?? false);
 
   @override
@@ -604,7 +604,7 @@ class _BoardTokenState extends State<BoardToken>
   @override
   void initState() {
     super.initState();
-    if (GameExperienceSettings.instance.reducedMotion) {
+    if (GameExperienceSettings.instance.effectiveReducedMotion) {
       _arrival.value = 1;
     } else {
       _arrival.forward();
@@ -629,7 +629,7 @@ class _BoardTokenState extends State<BoardToken>
       );
     },
     child: AnimatedContainer(
-      duration: GameExperienceSettings.instance.reducedMotion
+      duration: GameExperienceSettings.instance.effectiveReducedMotion
           ? Duration.zero
           : const Duration(milliseconds: 230),
       curve: Curves.easeOutCubic,

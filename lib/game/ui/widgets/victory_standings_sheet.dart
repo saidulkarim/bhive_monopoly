@@ -56,7 +56,7 @@ class VictoryStandingsSheet extends StatelessWidget {
       }
     }
     final reducedMotion =
-        GameExperienceSettings.instance.reducedMotion ||
+        GameExperienceSettings.instance.effectiveReducedMotion ||
         MediaQuery.maybeOf(context)?.disableAnimations == true;
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),

@@ -488,7 +488,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
     final finalFirst = _random.nextInt(6) + 1;
     final finalSecond = _random.nextInt(6) + 1;
     final reduceMotion =
-        GameExperienceSettings.instance.reducedMotion ||
+        GameExperienceSettings.instance.effectiveReducedMotion ||
         MediaQuery.of(context).disableAnimations;
     GameAudio.instance.fire(GameSfx.dice);
     setState(() {

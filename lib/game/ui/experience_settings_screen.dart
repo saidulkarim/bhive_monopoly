@@ -335,6 +335,119 @@ class _ExperienceSettingsScreenState extends State<ExperienceSettingsScreen> {
                           ),
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      Card(
+                        color: const Color(0xFF1D3436),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                t.choose(
+                                  'Power Management',
+                                  'ব্যাটারি সাশ্রয়',
+                                ),
+                                style: TextStyle(
+                                  color: kBoardGold,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                  fontFamily: t.font,
+                                  fontFamilyFallback: t.fallbackFonts,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                t.choose(
+                                  'Applies to this device only. Game rules and AI are unchanged.',
+                                  'শুধু এই ডিভাইসে প্রযোজ্য। খেলার নিয়ম ও কম্পিউটার খেলোয়াড় অপরিবর্তিত থাকবে।',
+                                ),
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontFamily: t.font,
+                                  fontFamilyFallback: t.fallbackFonts,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final profile in GamePowerProfile.values)
+                                    ChoiceChip(
+                                      selected:
+                                          settings.powerProfile == profile,
+                                      label: Text(
+                                        switch (profile) {
+                                          GamePowerProfile.performance =>
+                                            t.choose(
+                                              'Performance',
+                                              'উচ্চ পারফরম্যান্স',
+                                            ),
+                                          GamePowerProfile.balanced => t.choose(
+                                            'Balanced',
+                                            'ভারসাম্যপূর্ণ',
+                                          ),
+                                          GamePowerProfile.batterySaver =>
+                                            t.choose(
+                                              'Battery Saver',
+                                              'ব্যাটারি সাশ্রয়',
+                                            ),
+                                          GamePowerProfile.ultraSaver =>
+                                            t.choose(
+                                              'Ultra Saver',
+                                              'সর্বোচ্চ সাশ্রয়',
+                                            ),
+                                        },
+                                        style: TextStyle(
+                                          fontFamily: t.font,
+                                          fontFamilyFallback: t.fallbackFonts,
+                                        ),
+                                      ),
+                                      onSelected: (selected) {
+                                        if (selected) {
+                                          unawaited(
+                                            _apply(
+                                              () => settings.setPowerProfile(
+                                                profile,
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                switch (settings.powerProfile) {
+                                  GamePowerProfile.performance => t.choose(
+                                    'Full gameplay motion with longer location highlights.',
+                                    'পূর্ণ অ্যানিমেশন ও দীর্ঘ সময়ের অবস্থান হাইলাইট।',
+                                  ),
+                                  GamePowerProfile.balanced => t.choose(
+                                    'Full gameplay motion; location highlights settle when idle.',
+                                    'পূর্ণ অ্যানিমেশন; নিষ্ক্রিয় অবস্থায় হাইলাইট স্থির থাকে।',
+                                  ),
+                                  GamePowerProfile.batterySaver => t.choose(
+                                    'Static location highlights; gameplay motion is preserved.',
+                                    'স্থির অবস্থান হাইলাইট; খেলার অ্যানিমেশন বজায় থাকে।',
+                                  ),
+                                  GamePowerProfile.ultraSaver => t.choose(
+                                    'Static highlights and reduced gameplay motion.',
+                                    'স্থির হাইলাইট ও কম অ্যানিমেশন।',
+                                  ),
+                                },
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontFamily: t.font,
+                                  fontFamilyFallback: t.fallbackFonts,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 20),
                       OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(

@@ -12,7 +12,7 @@ class AnimatedDeedEntrance extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final reduced =
-        GameExperienceSettings.instance.reducedMotion ||
+        GameExperienceSettings.instance.effectiveReducedMotion ||
         MediaQuery.maybeOf(context)?.disableAnimations == true;
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0, end: 1),

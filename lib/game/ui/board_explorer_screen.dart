@@ -87,7 +87,7 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen>
       side: _boardSide,
       reducedMotion:
           media.disableAnimations ||
-          GameExperienceSettings.instance.reducedMotion,
+          GameExperienceSettings.instance.effectiveReducedMotion,
     );
   }
 
