@@ -179,8 +179,8 @@ class _CreditsScreenState extends State<CreditsScreen> {
                 const SizedBox(height: 12),
                 Text(
                   t.choose(
-                    'Independent game project. Not affiliated with or endorsed by the owners of the MONOPOLY trademark.',
-                    'এটি একটি স্বাধীন গেম প্রকল্প। MONOPOLY ট্রেডমার্কের মালিকদের সঙ্গে এর কোনো সম্পর্ক বা অনুমোদন নেই।',
+                    'Independent game project. It has no connection with the owners of the MONOPOLY trademark.',
+                    'এটি একটি স্বাধীন গেম প্রকল্প। MONOPOLY ট্রেডমার্কের মালিকদের সঙ্গে এর কোনো সম্পর্ক নেই।',
                   ),
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: Colors.white60, fontSize: 12),
