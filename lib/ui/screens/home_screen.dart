@@ -13,7 +13,7 @@ import 'profile_screen.dart';
 import 'font_settings_screen.dart';
 import 'rules_screen.dart';
 import 'credits_screen.dart';
-import 'play_guide_screen.dart';
+//import 'play_guide_screen.dart';
 import '../../game/engine/game_engine.dart';
 import '../../game/ui/game_setup_screen.dart';
 import '../../game/ui/game_typography.dart';
@@ -609,12 +609,12 @@ class HomeScreen extends ConsumerWidget {
               'গেম অভিজ্ঞতা',
               () => ExperienceSettingsScreen(languageCode: languageCode),
             ),
-            action(
-              Icons.menu_book_rounded,
-              'How to Play',
-              'খেলার নির্দেশিকা',
-              () => PlayGuideScreen(languageCode: languageCode),
-            ),
+            // action(
+            //   Icons.menu_book_rounded,
+            //   'How to Play',
+            //   'খেলার নির্দেশিকা',
+            //   () => PlayGuideScreen(languageCode: languageCode),
+            // ),
             action(
               Icons.info_outline_rounded,
               'Credits',
