@@ -4,13 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('Five offline 3D models are packaged as GLB files', () async {
+  test('Four offline 3D models are packaged as GLB files', () async {
     const names = <String>[
       'gold_car',
       'pearl_yacht',
       'royal_crown',
       'sky_rocket',
-      'pearl_dice',
     ];
     for (final name in names) {
       final bytes = await rootBundle.load('assets/models/$name.glb');

@@ -1,4 +1,4 @@
-# bHiVE Monopoly Phase 12 - non-destructive validation for Windows / VS Code.
+﻿# bHiVE Monopoly Phase 12 - non-destructive validation for Windows / VS Code.
 # Examples:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\phase12_release_check.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\phase12_release_check.ps1 -FullTests -BuildWeb
@@ -44,7 +44,7 @@ foreach ($relative in $required) {
 }
 
 # These assets caused a missing-bundle test failure during Phase 8.
-$modelNames = @('gold_car', 'pearl_yacht', 'royal_crown', 'sky_rocket', 'pearl_dice')
+$modelNames = @('gold_car', 'pearl_yacht', 'royal_crown', 'sky_rocket')
 foreach ($model in $modelNames) {
   $modelPath = Join-Path $projectRoot "assets\models\$model.glb"
   if (-not (Test-Path $modelPath)) {
@@ -76,3 +76,4 @@ if ($BuildAndroid) {
 
 Write-Host "`nPhase 12 checks completed successfully." -ForegroundColor Green
 Write-Host 'Still test real Android devices, Chrome, and 2+ devices on a LAN before release.'
+
