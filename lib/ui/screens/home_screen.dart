@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../core/ui/app_notices.dart';
+import '../../core/ui/game_diagnostics.dart';
+import '../../core/config/game_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -13,15 +15,22 @@ import 'profile_screen.dart';
 import 'font_settings_screen.dart';
 import 'rules_screen.dart';
 import 'credits_screen.dart';
-//import 'play_guide_screen.dart';
+import 'play_guide_screen.dart';
 import '../../game/engine/game_engine.dart';
 import '../../game/ui/game_setup_screen.dart';
 import '../../game/ui/game_typography.dart';
 import '../../game/ui/experience_settings_screen.dart';
 import '../../game/ui/match_history_screen.dart';
 
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  bool _openingGameSetup = false;
 
   Future<void> _changeLanguage(
     BuildContext context,
@@ -39,27 +48,44 @@ class HomeScreen extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final state = ref.watch(appControllerProvider).requireValue;
     final l10n = AppLocalizations.of(context);
     final name = state.displayName.isEmpty ? l10n.player : state.displayName;
 
-    // Both the compact floating shortcut and the large bottom CTA use the
-    // same route, so they can never open different setup flows.
-    void openGameSetup() {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => GameTypography(
-            languageCode: state.languageCode,
-            child: GameSetupScreen(
+    Future<void> openGameSetup() async {
+      if (!mounted || _openingGameSetup) return;
+      setState(() => _openingGameSetup = true);
+      try {
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => GameTypography(
               languageCode: state.languageCode,
-              playerName: name,
-              avatarIndex: state.avatarIndex,
-              avatarBytes: state.avatarBytes,
+              child: GameSetupScreen(
+                languageCode: state.languageCode,
+                playerName: name,
+                avatarIndex: state.avatarIndex,
+                avatarBytes: state.avatarBytes,
+              ),
             ),
           ),
-        ),
-      );
+        );
+      } catch (error, stack) {
+        GameDiagnostics.record('open game setup', error, stack);
+        if (mounted) {
+          AppNotices.of(this.context).showSnackBar(
+            SnackBar(
+              content: Text(
+                state.languageCode == 'bn'
+                    ? 'খেলা শুরু করা যায়নি। আবার চেষ্টা করুন।'
+                    : 'Unable to open game setup. Please try again.',
+              ),
+            ),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _openingGameSetup = false);
+      }
     }
 
     return AnimatedBuilder(
@@ -73,9 +99,6 @@ class HomeScreen extends ConsumerWidget {
             state.languageCode,
             state.isSaving,
           ),
-          // The mobile quick-start is anchored in the hero section below.
-          // A Scaffold FAB based on viewport coordinates can land over the
-          // hero (or outside the visible content) on tall or short phones.
           body: DecoratedBox(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -129,84 +152,16 @@ class HomeScreen extends ConsumerWidget {
                           ],
                         ),
                         const SizedBox(height: 48),
-                        // The shortcut is placed in the hero's left empty
-                        // region (rather than a Scaffold FAB at the bottom).
-                        // Always build it: relying on viewport/platform checks
-                        // made it disappear on some Android window sizes.
                         SizedBox(
                           height: 100,
                           child: LayoutBuilder(
-                            builder: (context, constraints) {
-                              final available = constraints.maxWidth;
-                              final narrow = available < 305;
-                              final compact = available < 525;
-                              final bn = state.languageCode == 'bn';
-                              final caption = bn
-                                  ? (compact ? 'শুরু' : 'খেলা শুরু করুন')
-                                  : (narrow
-                                        ? 'PLAY'
-                                        : compact
-                                        ? 'START'
-                                        : 'START GAME');
-                              return Stack(
-                                fit: StackFit.expand,
-                                children: [
-                                  Center(
-                                    child: Icon(
-                                      Icons.domain_rounded,
-                                      size: narrow ? 72 : 96,
-                                      color: AppTheme.gold,
-                                    ),
-                                  ),
-                                  Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: Semantics(
-                                      button: true,
-                                      label: bn
-                                          ? 'নতুন খেলা শুরু করুন'
-                                          : 'Start a new game',
-                                      child: FilledButton.icon(
-                                        key: const ValueKey<String>(
-                                          'home-floating-start-game',
-                                        ),
-                                        onPressed: openGameSetup,
-                                        style: FilledButton.styleFrom(
-                                          backgroundColor: AppTheme.gold,
-                                          foregroundColor: AppTheme.obsidian,
-                                          minimumSize: const Size(80, 48),
-                                          padding: EdgeInsets.symmetric(
-                                            horizontal: narrow ? 7 : 10,
-                                          ),
-                                          elevation: 6,
-                                          shadowColor: AppTheme.gold,
-                                          shape: const StadiumBorder(),
-                                          visualDensity: VisualDensity.compact,
-                                        ),
-                                        icon: const Icon(
-                                          Icons.play_arrow_rounded,
-                                          size: 19,
-                                        ),
-                                        label: Text(
-                                          caption,
-                                          maxLines: 1,
-                                          style: TextStyle(
-                                            fontFamily: GameTypography.family(
-                                              state.languageCode,
-                                            ),
-                                            fontFamilyFallback:
-                                                GameTypography.fallbacks(
-                                                  state.languageCode,
-                                                ),
-                                            fontSize: narrow ? 11 : 12,
-                                            fontWeight: FontWeight.w800,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              );
-                            },
+                            builder: (context, constraints) => Center(
+                              child: Icon(
+                                Icons.domain_rounded,
+                                size: constraints.maxWidth < 305 ? 72 : 96,
+                                color: AppTheme.gold,
+                              ),
+                            ),
                           ),
                         ),
                         const SizedBox(height: 24),
@@ -230,7 +185,69 @@ class HomeScreen extends ConsumerWidget {
                             Theme.of(context).textTheme.titleMedium,
                           ),
                         ),
-                        const SizedBox(height: 40),
+                        const SizedBox(
+                          height: GameConfig.homeStartButtonTopSpacing,
+                        ),
+                        Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              maxWidth: GameConfig.homeStartButtonMaximumWidth,
+                            ),
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                key: const ValueKey<String>(
+                                  'home-primary-start-game',
+                                ),
+                                onPressed: _openingGameSetup
+                                    ? null
+                                    : openGameSetup,
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppTheme.gold,
+                                  foregroundColor: AppTheme.obsidian,
+                                  minimumSize: const Size(
+                                    0,
+                                    GameConfig.homeStartButtonHeight,
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(
+                                      GameConfig.homeStartButtonBorderRadius,
+                                    ),
+                                  ),
+                                ),
+                                icon: const Icon(
+                                  Icons.play_arrow_rounded,
+                                  size: GameConfig.homeStartButtonIconSize,
+                                ),
+                                label: Text(
+                                  state.languageCode == 'bn'
+                                      ? 'খেলা শুরু করুন'
+                                      : 'START GAME',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontFamily: GameTypography.family(
+                                      state.languageCode,
+                                    ),
+                                    fontFamilyFallback:
+                                        GameTypography.fallbacks(
+                                          state.languageCode,
+                                        ),
+                                    fontWeight: FontWeight.w800,
+                                    fontSize:
+                                        GameConfig.homeStartButtonFontSize,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(
+                          height: GameConfig.homeStartButtonBottomSpacing,
+                        ),
                         LayoutBuilder(
                           builder: (context, constraints) {
                             // LayoutBuilder reports the *content* width,
@@ -410,34 +427,6 @@ class HomeScreen extends ConsumerWidget {
                             );
                           },
                         ),
-                        const SizedBox(height: 22),
-                        FilledButton.icon(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppTheme.gold,
-                            foregroundColor: AppTheme.obsidian,
-                            minimumSize: const Size.fromHeight(60),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                          ),
-                          onPressed: openGameSetup,
-                          icon: const Icon(Icons.casino_rounded),
-                          label: Text(
-                            state.languageCode == 'bn'
-                                ? 'খেলা শুরু করুন (লোকাল মাল্টিপ্লেয়ার)'
-                                : 'START GAME · LOCAL MULTIPLAYER',
-                            style: TextStyle(
-                              fontFamily: GameTypography.family(
-                                state.languageCode,
-                              ),
-                              fontFamilyFallback: GameTypography.fallbacks(
-                                state.languageCode,
-                              ),
-                              fontWeight: FontWeight.w800,
-                              fontSize: 17,
-                            ),
-                          ),
-                        ),
                       ],
                     ),
                   ),
@@ -609,12 +598,12 @@ class HomeScreen extends ConsumerWidget {
               'গেম অভিজ্ঞতা',
               () => ExperienceSettingsScreen(languageCode: languageCode),
             ),
-            // action(
-            //   Icons.menu_book_rounded,
-            //   'How to Play',
-            //   'খেলার নির্দেশিকা',
-            //   () => PlayGuideScreen(languageCode: languageCode),
-            // ),
+            action(
+              Icons.menu_book_rounded,
+              'How to Play',
+              'খেলার নির্দেশিকা',
+              () => PlayGuideScreen(languageCode: languageCode),
+            ),
             action(
               Icons.info_outline_rounded,
               'Credits',

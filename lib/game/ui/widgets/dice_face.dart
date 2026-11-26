@@ -1,6 +1,11 @@
+// ignore_for_file: deprecated_member_use
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+
+import '../../../core/config/game_config.dart';
+import '../../../core/ui/visual_activity_scope.dart';
 
 import '../../experience/game_experience_settings.dart';
 import '../../experience/token_preferences.dart';
@@ -186,9 +191,13 @@ class _RollingDiceFaceState extends State<RollingDiceFace>
     value: 1,
   );
 
+  bool _spinStarted = false;
+
+  bool _environmentAllowsMotion = true;
+
   bool get _motionAllowed =>
-      !GameExperienceSettings.instance.effectiveReducedMotion &&
-      !(MediaQuery.maybeOf(context)?.disableAnimations ?? false);
+      _environmentAllowsMotion &&
+      !GameExperienceSettings.instance.effectiveReducedMotion;
 
   @override
   void initState() {
@@ -200,6 +209,11 @@ class _RollingDiceFaceState extends State<RollingDiceFace>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _environmentAllowsMotion =
+        VisualActivityScope.isForegroundOf(context) &&
+        TickerMode.of(context) &&
+        ModalRoute.isCurrentOf(context) != false &&
+        !(MediaQuery.maybeOf(context)?.disableAnimations ?? false);
     _syncRolling();
   }
 
@@ -225,9 +239,22 @@ class _RollingDiceFaceState extends State<RollingDiceFace>
     if (widget.rolling && _motionAllowed) {
       _land.stop();
       _land.value = 0;
-      if (!_spin.isAnimating) _spin.repeat();
+      if (!_spinStarted) {
+        _spinStarted = true;
+        if (GameConfig.advancedBatteryOptimizationEnabled) {
+          final cycles = GameConfig.maximumDecorativeDiceSpinCycles;
+          if (cycles > 0) {
+            _spin.repeat(count: cycles);
+          } else {
+            _spin.value = 0;
+          }
+        } else {
+          _spin.repeat();
+        }
+      }
     } else {
-      final wasSpinning = _spin.isAnimating;
+      final wasSpinning = _spin.isAnimating || _spinStarted;
+      _spinStarted = false;
       _spin.stop();
       if (wasSpinning && _motionAllowed) {
         _land.forward(from: 0);

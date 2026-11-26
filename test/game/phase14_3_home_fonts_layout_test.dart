@@ -108,7 +108,7 @@ void main() {
   testWidgets('Mobile home still exposes the start shortcut', (tester) async {
     await _pumpHome(tester, const Size(390, 844));
     expect(
-      find.byKey(const ValueKey<String>('home-floating-start-game')),
+      find.byKey(const ValueKey<String>('home-primary-start-game')),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);

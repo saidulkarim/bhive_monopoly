@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../experience/game_experience_settings.dart';
 import '../../../core/config/game_config.dart';
+import '../../../core/ui/visual_activity_scope.dart';
 
 /// One-time, asset-free celebration. Ignores touches; reduced-motion users
 /// see the normal trophy and winner text without moving particles.
@@ -29,8 +30,12 @@ class _VictoryConfettiState extends State<VictoryConfetti>
     super.didChangeDependencies();
     final reduced =
         GameExperienceSettings.instance.effectiveReducedMotion ||
-        MediaQuery.maybeOf(context)?.disableAnimations == true;
+        MediaQuery.maybeOf(context)?.disableAnimations == true ||
+        !VisualActivityScope.isForegroundOf(context) ||
+        !TickerMode.of(context) ||
+        ModalRoute.isCurrentOf(context) == false;
     if (reduced) {
+      _controller.stop();
       _controller.value = 1;
       _started = true;
     } else if (!_started) {

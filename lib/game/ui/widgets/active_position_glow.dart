@@ -3,6 +3,8 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+
+import '../../../core/ui/visual_activity_scope.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 
 /// A conspicuous but non-blocking position highlight for EVERY player.
@@ -66,15 +68,16 @@ class _ActivePositionGlowState extends State<ActivePositionGlow>
     final allowed =
         !widget.reducedMotion &&
         widget.pulseCycles > 0 &&
+        VisualActivityScope.isForegroundOf(context) &&
         TickerMode.of(context) &&
         ModalRoute.isCurrentOf(context) != false &&
         !(MediaQuery.maybeOf(context)?.disableAnimations ?? false);
-    final changed = _allowed != allowed;
+    final firstEvaluation = _allowed == null;
     _allowed = allowed;
     if (!allowed) {
       _controller.stop();
       _controller.value = 1;
-    } else if (changed || restart) {
+    } else if (firstEvaluation || restart) {
       // A finite pulse, never an idle frame loop.
       _controller.duration = Duration(milliseconds: 2100 * widget.pulseCycles);
       _controller.forward(from: 0);

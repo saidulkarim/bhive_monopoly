@@ -67,15 +67,17 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen>
     with SingleTickerProviderStateMixin {
   late bool _threeD = widget.initial3D;
   late bool _showList = widget.initialList;
-  late final SmartBoardFocusController _focus = SmartBoardFocusController(
-    vsync: this,
-  );
+  int? _selectedOwner;
+  // Initialize while the State is active, even when opened in list mode.
+  // A lazy initializer could otherwise create a ticker during dispose().
+  late final SmartBoardFocusController _focus;
   TransformationController get _transform => _focus.transform;
   double _boardSide = 360;
 
   @override
   void initState() {
     super.initState();
+    _focus = SmartBoardFocusController(vsync: this);
     widget.boardUpdates?.addListener(_onBoardUpdate);
   }
 
@@ -198,119 +200,185 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen>
             (widget.actionEnabled?.call() ?? widget.canAct),
         text: t,
         child: SafeArea(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                child: Row(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final wide =
+                  GameConfig.responsiveBoardLayoutEnabled &&
+                  constraints.maxWidth >=
+                      GameConfig.landscapeBoardMinimumWidth &&
+                  constraints.maxWidth > constraints.maxHeight &&
+                  constraints.maxHeight >=
+                      GameConfig.landscapeBoardMinimumHeight;
+              final header = _viewControls(t);
+              final content = _showList ? _tileList() : _board(currentGame, t);
+              if (!wide) {
+                return Column(
                   children: [
-                    _modeButton(
-                      '2D',
-                      !_threeD,
-                      () => setState(() => _threeD = false),
-                    ),
-                    const SizedBox(width: 8),
-                    _modeButton(
-                      '3D',
-                      _threeD,
-                      () => setState(() => _threeD = true),
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: () => setState(() => _showList = !_showList),
-                      icon: Icon(_showList ? Icons.grid_on : Icons.list),
-                      label: Text(
-                        t.choose(
-                          _showList ? 'Board' : 'All 40',
-                          _showList ? 'বোর্ড' : '৪০ ঘর',
-                        ),
-                      ),
-                    ),
+                    header,
+                    _players(currentGame, t),
+                    Expanded(child: content),
+                    if (!_showList) _zoomToolbar(t),
+                    if (!_showList) _boardHint(t, textStyle),
                   ],
-                ),
-              ),
-              // Always-visible scrollable cash ranking in full-screen play.
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Semantics(
-                  label: t.choose(
-                    'Player cash balances and cash leader',
-                    'খেলোয়াড়দের নগদ অর্থ ও সর্বোচ্চ নগদ',
-                  ),
-                  child: CompactPlayersStrip(
-                    key: const ValueKey<String>('explorer-cash-leaderboard'),
-                    game: currentGame,
-                    text: t,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: _showList
-                    ? _tileList()
-                    : LayoutBuilder(
-                        builder: (context, box) {
-                          _boardSide = box.biggest.shortestSide;
-                          return GameBoardView(
-                            engine: currentGame,
-                            text: t,
-                            onSelect: _select,
-                            perspective: true,
-                            cameraOverride: _threeD
-                                ? BoardCameraPreset.tabletop
-                                : BoardCameraPreset.topDown,
-                            transformationController: _transform,
-                            onInteractionStart: (_) => _focus.pause(),
-                            visiblePositions: widget.visiblePositions,
-                            dicePreview:
-                                widget.diceValueProvider?.call() ??
-                                widget.dicePreview,
-                            diceRolling:
-                                widget.isRollingProvider?.call() ??
-                                widget.diceRolling,
-                            onRoll: widget.onRoll,
-                            onEndTurn: widget.onEndTurn,
-                            canAct: widget.canAct,
-                            actionEnabled: widget.actionEnabled,
-                            // The inline status itself is the action button;
-                            // never add a second large REVIEW OPTIONS panel.
-                            onReviewDecision: widget.onReviewDecision,
-                            decisionEnabled: widget.decisionEnabled,
-                            onViewActivity: widget.onViewActivity,
-                          );
-                        },
-                      ),
-              ),
-              if (!_showList) _zoomToolbar(t),
-              if (!_showList)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 5, 12, 12),
-                  child: Text(
-                    t.choose(
-                      'Pinch to zoom • Drag to pan • Tap a space for details',
-                      'দুই আঙুলে বড় করুন • সরিয়ে দেখুন • তথ্যের জন্য ঘর চাপুন',
-                    ),
-                    textAlign: TextAlign.center,
-                    style: textStyle.copyWith(
-                      color: Colors.white70,
-                      fontSize: 12,
+                );
+              }
+              final sidebarWidth = GameConfig.landscapePlayerSidebarWidth
+                  .clamp(
+                    GameConfig.landscapePlayerSidebarMinimumWidth,
+                    GameConfig.landscapePlayerSidebarMaximumWidth,
+                  )
+                  .toDouble();
+              return Row(
+                key: const ValueKey('explorer-wide-layout'),
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(
+                    key: const ValueKey('explorer-player-sidebar'),
+                    width: sidebarWidth,
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: _players(currentGame, t, vertical: true),
+                        ),
+                        if (!_showList &&
+                            GameConfig.landscapeSidebarZoomControlsEnabled)
+                          _zoomToolbar(t, compact: true),
+                      ],
                     ),
                   ),
-                ),
-            ],
+                  const VerticalDivider(
+                    width: 1,
+                    thickness: 1,
+                    color: Colors.white12,
+                  ),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        header,
+                        Expanded(child: content),
+                        if (!_showList &&
+                            !GameConfig.landscapeSidebarZoomControlsEnabled)
+                          _zoomToolbar(t),
+                        if (!_showList) _boardHint(t, textStyle),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),
     );
   }
 
-  /// Positioned below the board, horizontally, so it never obscures a tile.
-  Widget _zoomToolbar(GameText t) => Padding(
-    padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
+  // A changed viewport invalidates pixel-based pan offsets. Reset once
+  // after layout, never during build or on ordinary game-state updates.
+  void _updateBoardSide(double side) {
+    if (!side.isFinite || side <= 0 || (_boardSide - side).abs() < 1) return;
+    _boardSide = side;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _showList || _boardSide != side) return;
+      _setZoom(1);
+    });
+  }
+
+  Widget _viewControls(GameText t) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    child: Row(
+      children: [
+        _modeButton('2D', !_threeD, () => setState(() => _threeD = false)),
+        const SizedBox(width: 8),
+        _modeButton('3D', _threeD, () => setState(() => _threeD = true)),
+        const Spacer(),
+        TextButton.icon(
+          onPressed: () => setState(() => _showList = !_showList),
+          icon: Icon(_showList ? Icons.grid_on : Icons.list),
+          label: Text(
+            t.choose(
+              _showList ? 'Board' : 'All 40',
+              _showList ? 'বোর্ড' : '৪০ ঘর',
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _players(
+    GameEngine currentGame,
+    GameText t, {
+    bool vertical = false,
+  }) => Padding(
+    padding: EdgeInsets.symmetric(horizontal: vertical ? 6 : 10),
+    child: Semantics(
+      label: t.choose(
+        'Player cash balances and cash leader',
+        'খেলোয়াড়দের নগদ অর্থ ও সর্বোচ্চ নগদ',
+      ),
+      child: CompactPlayersStrip(
+        key: const ValueKey<String>('explorer-cash-leaderboard'),
+        game: currentGame,
+        vertical: vertical,
+        text: t,
+        selectedPlayerId: _showList ? _selectedOwner : null,
+        onPlayerTap: _showList && GameConfig.playerPropertyFilterEnabled
+            ? (id) => setState(
+                () => _selectedOwner = _selectedOwner == id ? null : id,
+              )
+            : null,
+      ),
+    ),
+  );
+
+  Widget _board(GameEngine currentGame, GameText t) => LayoutBuilder(
+    builder: (context, box) {
+      final side = box.biggest.shortestSide;
+      _updateBoardSide(side);
+      return GameBoardView(
+        engine: currentGame,
+        text: t,
+        onSelect: _select,
+        perspective: true,
+        cameraOverride: _threeD
+            ? BoardCameraPreset.tabletop
+            : BoardCameraPreset.topDown,
+        transformationController: _transform,
+        onInteractionStart: (_) => _focus.pause(),
+        visiblePositions: widget.visiblePositions,
+        dicePreview: widget.diceValueProvider?.call() ?? widget.dicePreview,
+        diceRolling: widget.isRollingProvider?.call() ?? widget.diceRolling,
+        onRoll: widget.onRoll,
+        onEndTurn: widget.onEndTurn,
+        canAct: widget.canAct,
+        actionEnabled: widget.actionEnabled,
+        // The inline status itself is the action button;
+        // never add a second large REVIEW OPTIONS panel.
+        onReviewDecision: widget.onReviewDecision,
+        decisionEnabled: widget.decisionEnabled,
+        onViewActivity: widget.onViewActivity,
+      );
+    },
+  );
+
+  Widget _boardHint(GameText t, TextStyle textStyle) => Padding(
+    padding: const EdgeInsets.fromLTRB(12, 5, 12, 12),
+    child: Text(
+      t.choose(
+        'Pinch to zoom • Drag to pan • Tap a space for details',
+        'দুই আঙুলে বড় করুন • সরিয়ে দেখুন • তথ্যের জন্য ঘর চাপুন',
+      ),
+      textAlign: TextAlign.center,
+      style: textStyle.copyWith(color: Colors.white70, fontSize: 12),
+    ),
+  );
+
+  /// Below the board in portrait, or in the sidebar in wide mode.
+  /// Wrap keeps all controls reachable on a narrow sidebar.
+  Widget _zoomToolbar(GameText t, {bool compact = false}) => Padding(
+    padding: EdgeInsets.fromLTRB(compact ? 4 : 12, 2, compact ? 4 : 12, 2),
     child: Align(
-      alignment: Alignment.centerRight,
+      alignment: compact ? Alignment.center : Alignment.centerRight,
       child: DecoratedBox(
         key: const ValueKey<String>('board-zoom-toolbar'),
         decoration: BoxDecoration(
@@ -318,8 +386,9 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen>
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: kBoardGold.withValues(alpha: .45)),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
+        child: Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             IconButton(
               tooltip: t.choose('Zoom out', 'ছোট করুন'),
@@ -404,81 +473,135 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen>
       fontFamilyFallback: t.fallbackFonts,
     );
     final game = widget.gameProvider?.call() ?? widget.game;
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      itemCount: game.spaces.length,
-      itemBuilder: (context, index) {
-        final tile = game.spaces[index];
-        final property = game.properties[index];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 7),
-          child: Material(
-            color: property.mortgaged
-                ? Color.alphaBlend(
-                    const Color(
-                      GameConfig.mortgageOverlayColor,
-                    ).withValues(alpha: GameConfig.mortgageOverlayOpacity),
-                    const Color(0xFF1A3333),
-                  )
-                : const Color(0xFF1A3333),
-            borderRadius: BorderRadius.circular(11),
-            child: ListTile(
-              onTap: () => _select(index),
-              leading: CircleAvatar(
-                backgroundColor: groupColor(tile.group),
-                foregroundColor: kBoardDark,
-                child: Text(
-                  t.integer(index),
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+    final owner = _selectedOwner;
+    final indices = <int>[
+      for (final tile in game.spaces)
+        if (owner == null ||
+            (tile.purchasable && game.properties[tile.index].ownerId == owner))
+          tile.index,
+    ];
+    return Column(
+      children: [
+        if (owner != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    GameConfig.playerPropertySummaryEnabled
+                        ? '${game.players[owner].name} · ${t.integer(indices.length)} ${t.choose('properties', 'সম্পত্তি')}'
+                        : game.players[owner].name,
+                  ),
                 ),
-              ),
-              title: Text(
-                t.spaceName(index, tile.name),
-                style: style.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
+                TextButton(
+                  onPressed: () => setState(() => _selectedOwner = null),
+                  child: Text(t.choose('Show all', 'সব দেখুন')),
                 ),
-              ),
-              subtitle: Text(
-                property.ownerId == null
-                    ? t.choose('Unowned / special', 'মালিক নেই / বিশেষ ঘর')
-                    : '${t.choose('Owner', 'মালিক')}: ${game.players[property.ownerId!].name}',
-                style: style.copyWith(color: Colors.white70, fontSize: 12),
-              ),
-              trailing: property.mortgaged
-                  ? Tooltip(
-                      message: t.choose(
-                        'Mortgaged — no rent',
-                        'বন্ধক রাখা হয়েছে — ভাড়া নেই',
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.lock_rounded,
-                            color: Colors.white,
-                            size: 24,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            t.money(tile.price),
-                            style: style.copyWith(color: kBoardGold),
-                          ),
-                        ],
-                      ),
-                    )
-                  : ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 98),
-                      child: Text(
-                        tile.price > 0 ? t.money(tile.price) : '—',
-                        textAlign: TextAlign.end,
-                        style: style.copyWith(color: kBoardGold, fontSize: 14),
-                      ),
-                    ),
+              ],
             ),
           ),
-        );
-      },
+        if (indices.isEmpty)
+          Expanded(
+            child: Center(
+              child: Text(
+                t.choose('No properties owned', 'কোনো সম্পত্তির মালিকানা নেই'),
+              ),
+            ),
+          )
+        else
+          Expanded(
+            child: ListView.builder(
+              key: ValueKey(owner),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              itemCount: indices.length,
+              itemBuilder: (context, row) {
+                final index = indices[row];
+                final tile = game.spaces[index];
+                final property = game.properties[index];
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 7),
+                  child: Material(
+                    color: property.mortgaged
+                        ? Color.alphaBlend(
+                            const Color(
+                              GameConfig.mortgageOverlayColor,
+                            ).withValues(
+                              alpha: GameConfig.mortgageOverlayOpacity,
+                            ),
+                            const Color(0xFF1A3333),
+                          )
+                        : const Color(0xFF1A3333),
+                    borderRadius: BorderRadius.circular(11),
+                    child: ListTile(
+                      onTap: () => _select(index),
+                      leading: CircleAvatar(
+                        backgroundColor: groupColor(tile.group),
+                        foregroundColor: kBoardDark,
+                        child: Text(
+                          t.integer(index),
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      title: Text(
+                        t.spaceName(index, tile.name),
+                        style: style.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      subtitle: Text(
+                        property.ownerId == null
+                            ? t.choose(
+                                'Unowned / special',
+                                'মালিক নেই / বিশেষ ঘর',
+                              )
+                            : '${t.choose('Owner', 'মালিক')}: ${game.players[property.ownerId!].name}',
+                        style: style.copyWith(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                      trailing: property.mortgaged
+                          ? Tooltip(
+                              message: t.choose(
+                                'Mortgaged — no rent',
+                                'বন্ধক রাখা হয়েছে — ভাড়া নেই',
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.lock_rounded,
+                                    color: Colors.white,
+                                    size: 24,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    t.money(tile.price),
+                                    style: style.copyWith(color: kBoardGold),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 98),
+                              child: Text(
+                                tile.price > 0 ? t.money(tile.price) : '—',
+                                textAlign: TextAlign.end,
+                                style: style.copyWith(
+                                  color: kBoardGold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+      ],
     );
   }
 }

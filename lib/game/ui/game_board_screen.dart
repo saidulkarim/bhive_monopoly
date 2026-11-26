@@ -30,6 +30,7 @@ import 'widgets/game_board_view.dart';
 import 'widgets/adaptive_board_panel.dart';
 import 'widgets/compact_players_strip.dart';
 import 'widgets/property_deed_card.dart';
+import 'widgets/property_buy_request.dart';
 import 'widgets/animated_deed_entrance.dart';
 import 'widgets/victory_standings_sheet.dart';
 import 'widgets/game_activity_sheet.dart';
@@ -67,6 +68,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
   final Random _random = Random();
   final BotController _botController = BotController();
   int _lastBotTradeTurn = -100000;
+  final Map<(int, int), int> _lastBuyRequest = {};
   Timer? _botTimer;
   final Map<int, int> _visiblePositions = <int, int>{};
   DiceRoll? _dicePreview;
@@ -1550,7 +1552,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
     final turn = game.turnNumber;
     try {
       final s = game.spaces[index];
-      final trade = await showSettledSheet<bool>(
+      final trade = await showSettledSheet<String>(
         context: context,
         isScrollControlled: true,
         backgroundColor: const Color(0xFF1B3031),
@@ -1629,10 +1631,32 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
                                 'অন্য খেলোয়াড়কে বিক্রি',
                               ),
                               () {
-                                Navigator.pop(ctx, true);
+                                Navigator.pop(ctx, 'sell');
                               },
                             ),
                           ],
+                        ],
+                        if (GameConfig.propertyBuyRequestEnabled &&
+                            !_isBot(seller) &&
+                            canRequestProperty(game, seller, index) &&
+                            (_isBot(state.ownerId!)
+                                ? GameConfig.aiPropertyBuyRequestEnabled
+                                : GameConfig
+                                      .humanPropertyBuyRequestEnabled)) ...[
+                          if (GameConfig.colorGroupRecommendationEnabled &&
+                              completesPurchaseGroup(game, seller, index))
+                            Text(
+                              t.choose(
+                                'Complete your color group with this property.',
+                                'এই সম্পত্তি কিনলে একই রঙের সেট সম্পূর্ণ হবে।',
+                              ),
+                            ),
+                          const SizedBox(height: 8),
+                          _primary(
+                            t.choose('REQUEST TO BUY', 'কেনার প্রস্তাব দিন'),
+                            Icons.shopping_cart_outlined,
+                            () => Navigator.pop(ctx, 'buy'),
+                          ),
                         ],
                         const SizedBox(height: 12),
                         _secondary(
@@ -1649,14 +1673,197 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
         ),
       );
       if (mounted &&
-          trade == true &&
           game.currentPlayerId == seller &&
           game.turnNumber == turn) {
-        await _offerTrade(index);
+        if (trade == 'sell') await _offerTrade(index);
+        if (trade == 'buy') await _requestBuy(index);
       }
     } finally {
       _propertyModalOpen = false;
       if (mounted) _scheduleDecisionPrompt();
+    }
+  }
+
+  Future<void> _requestBuy(int index) async {
+    final buyer = game.currentPlayerId;
+    final owner = game.properties[index].ownerId;
+    final turn = game.turnNumber;
+    if (owner == null || !canRequestProperty(game, buyer, index)) return;
+    final key = (buyer, index);
+    void notice(String en, String bn) {
+      if (mounted) {
+        AppNotices.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(t.choose(en, bn))));
+      }
+    }
+
+    if (turn - (_lastBuyRequest[key] ?? -100000) <
+        GameConfig.propertyBuyRequestCooldownTurns) {
+      notice(
+        'Please wait before requesting this property again.',
+        'আবার প্রস্তাব দেওয়ার আগে কিছুক্ষণ অপেক্ষা করুন।',
+      );
+      return;
+    }
+    bool current() =>
+        mounted &&
+        !_busy &&
+        _actingBotId == null &&
+        game.turnNumber == turn &&
+        game.currentPlayerId == buyer &&
+        game.properties[index].ownerId == owner;
+    final title = t.spaceName(index, game.spaces[index].name);
+    final price = TextEditingController(text: '${game.spaces[index].price}');
+    int? parsePrice() {
+      var value = price.text.trim();
+      const digits = '০১২৩৪৫৬৭৮৯';
+      for (var i = 0; i < 10; i++) {
+        value = value.replaceAll(digits[i], '$i');
+      }
+      return RegExp(r'^[0-9]+$').hasMatch(value) ? int.tryParse(value) : null;
+    }
+
+    Future<bool> confirm(String heading, String detail) async =>
+        (await showSettledDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(heading),
+            content: Text(detail),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(t.choose('DECLINE', 'প্রত্যাখ্যান')),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: Text(t.choose('ACCEPT', 'গ্রহণ')),
+              ),
+            ],
+          ),
+        )) ==
+        true;
+    try {
+      final approved = await showSettledDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(
+            t.choose('Property buy request', 'সম্পত্তি কেনার প্রস্তাব'),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('$title · ${game.players[owner].name}'),
+                Text(
+                  '${t.choose('Available cash', 'উপলব্ধ নগদ')}: ${t.money(game.players[buyer].balance)}',
+                ),
+                TextField(
+                  controller: price,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: t.choose('Offer price', 'প্রস্তাবিত মূল্য'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(t.choose('CANCEL', 'বাতিল')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(t.choose('SEND BUY REQUEST', 'কেনার প্রস্তাব পাঠান')),
+            ),
+          ],
+        ),
+      );
+      if (approved != true || !current()) return;
+      final amount = parsePrice();
+      if (amount == null || amount <= 0) {
+        notice('Enter a positive whole number.', 'ধনাত্মক পূর্ণসংখ্যা লিখুন।');
+        return;
+      }
+      var offer = propertyBuyOffer(buyer, owner, index, amount);
+      game.validateTrade(offer);
+      _lastBuyRequest[key] = turn;
+      final difficulty = widget.botDifficulties[owner];
+      if (difficulty != null) {
+        if (!_botController.acceptsTrade(game, offer, difficulty)) {
+          TradeOffer? counter;
+          if (GameConfig.propertyBuyCounterOfferEnabled) {
+            for (final multiplier
+                in GameConfig.propertyBuyCounterOfferMultipliers) {
+              final cost = (amount * multiplier).ceil();
+              if (cost <= amount || cost > game.players[buyer].balance) {
+                continue;
+              }
+              final candidate = propertyBuyOffer(buyer, owner, index, cost);
+              if (_botController.acceptsTrade(game, candidate, difficulty)) {
+                counter = candidate;
+                break;
+              }
+            }
+          }
+          if (counter == null) {
+            notice(
+              'Computer player declined the buy request.',
+              'কম্পিউটার খেলোয়াড় কেনার প্রস্তাব প্রত্যাখ্যান করেছে।',
+            );
+            return;
+          }
+          if (!await confirm(
+            t.choose('Computer counteroffer', 'কম্পিউটারের পাল্টা প্রস্তাব'),
+            '$title · ${t.money(counter.cashFrom)}',
+          )) {
+            return;
+          }
+          offer = counter;
+        }
+      } else {
+        if (!await confirm(
+          t.choose(
+            'Property owner: ${game.players[owner].name}',
+            'সম্পত্তির মালিক: ${game.players[owner].name}',
+          ),
+          t.choose(
+            'Pass the device to the owner. Sell $title for ${t.money(amount)}?',
+            'ডিভাইসটি মালিককে দিন। $title ${t.money(amount)}-এ বিক্রি করবেন?',
+          ),
+        )) {
+          return;
+        }
+      }
+      if (!current()) {
+        notice(
+          'The game changed. Open the request again.',
+          'খেলার অবস্থা বদলেছে। আবার প্রস্তাব দিন।',
+        );
+        return;
+      }
+      game.validateTrade(offer);
+      if (_run(() => game.acceptTrade(offer))) {
+        notice(
+          'Property purchased successfully.',
+          'সম্পত্তি সফলভাবে কেনা হয়েছে।',
+        );
+      }
+    } on GameRuleException catch (error) {
+      if (mounted) {
+        AppNotices.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(t.errorMessage(error.message))));
+      }
+    } catch (error, stack) {
+      GameDiagnostics.record('property buy request', error, stack);
+      notice(
+        'Request interrupted. Check ownership and cash before retrying.',
+        'প্রস্তাব বাধাগ্রস্ত হয়েছে। আবার চেষ্টা করার আগে মালিকানা ও টাকা যাচাই করুন।',
+      );
+    } finally {
+      price.dispose();
     }
   }
 

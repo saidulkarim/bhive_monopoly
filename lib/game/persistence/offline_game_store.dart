@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/config/game_config.dart';
 import '../ai/bot_controller.dart';
 import '../engine/game_engine.dart';
 
@@ -107,6 +108,14 @@ class OfflineGameStore {
           // Never promote a corrupt primary checkpoint over a good backup.
         }
       }
+      if (GameConfig.skipUnchangedOfflineCheckpoints &&
+          oldMatch != null &&
+          _groupId(oldMatch.matchId) == incomingGroup &&
+          prefs.getString(activeMatchKey) == incomingGroup &&
+          _sameCheckpoint(previous!, payload)) {
+        // Do not rotate the backup or update savedAt for an unchanged game.
+        return;
+      }
       if (oldMatch != null && _groupId(oldMatch.matchId) == incomingGroup) {
         if (!await prefs.setString(backupKey, previous!)) {
           throw StateError('Unable to write recovery checkpoint.');
@@ -129,6 +138,19 @@ class OfflineGameStore {
         throw StateError('Unable to finalize saved game.');
       }
     });
+  }
+
+  static bool _sameCheckpoint(String previous, String incoming) {
+    try {
+      final oldData = jsonDecode(previous) as Map<String, dynamic>;
+      final newData = jsonDecode(incoming) as Map<String, dynamic>;
+      oldData.remove('savedAt');
+      newData.remove('savedAt');
+      return jsonEncode(oldData) == jsonEncode(newData);
+    } catch (_) {
+      // A comparison failure must never suppress a real save.
+      return false;
+    }
   }
 
   static Future<SavedOfflineMatch?> load() async {

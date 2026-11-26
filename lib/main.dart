@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/theme/app_theme.dart';
 import 'core/ui/app_notices.dart';
+import 'core/ui/visual_activity_scope.dart';
 import 'core/ui/game_diagnostics.dart';
 import 'core/utils/currency_preferences.dart';
 import 'game/experience/player_palette.dart';
@@ -62,7 +63,9 @@ class MonopolyApp extends ConsumerWidget {
       // Keep the saved choice effective on every route and dialog.
       builder: (context, child) => FontAppBuilder(
         languageCode: language,
-        child: AppNoticeOverlay(child: child ?? const SizedBox.shrink()),
+        child: VisualActivityScope(
+          child: AppNoticeOverlay(child: child ?? const SizedBox.shrink()),
+        ),
       ),
       locale: Locale(language),
       supportedLocales: AppLocalizations.supportedLocales,

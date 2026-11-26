@@ -4,6 +4,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/ui/visual_activity_scope.dart';
+
 import '../../engine/game_engine.dart';
 import '../../experience/game_experience_settings.dart';
 import '../../experience/gameplay_motion.dart';
@@ -235,15 +237,16 @@ class _TokenLocationAuraState extends State<_TokenLocationAura>
     final allowed =
         !widget.reducedMotion &&
         widget.pulseCycles > 0 &&
+        VisualActivityScope.isForegroundOf(context) &&
         TickerMode.of(context) &&
         ModalRoute.isCurrentOf(context) != false &&
         !(MediaQuery.maybeOf(context)?.disableAnimations ?? false);
-    final changed = _allowed != allowed;
+    final firstEvaluation = _allowed == null;
     _allowed = allowed;
     if (!allowed) {
       _pulse.stop();
       _pulse.value = 1;
-    } else if (changed || restart) {
+    } else if (firstEvaluation || restart) {
       _pulse.duration = Duration(milliseconds: 1800 * widget.pulseCycles);
       _pulse.forward(from: 0);
     }

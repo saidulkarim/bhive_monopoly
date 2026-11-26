@@ -22,10 +22,10 @@ class BotNamePool {
     'Leo',
     'Maya',
     'Finn',
-    'Cleo',
-    'River',
+    'Ross',
+    'Blossom',
     'Axel',
-    'Skye',
+    'Trachi',
   ];
 
   static List<String> pick(

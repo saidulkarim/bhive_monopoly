@@ -1,8 +1,13 @@
+// ignore_for_file: deprecated_member_use
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
 import '../../core/ui/app_notices.dart';
+import '../../core/config/game_config.dart';
+import '../../core/ui/visual_activity_scope.dart';
+import '../experience/game_experience_settings.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 
 import '../experience/token_preferences.dart';
@@ -87,8 +92,22 @@ class _TokenSettingsScreenState extends State<TokenSettingsScreen> {
     body: !loaded
         ? const Center(child: CircularProgressIndicator(color: kBoardGold))
         : AnimatedBuilder(
-            animation: prefs,
+            animation: Listenable.merge([
+              prefs,
+              GameExperienceSettings.instance,
+            ]),
             builder: (context, _) {
+              final visible =
+                  VisualActivityScope.isForegroundOf(context) &&
+                  ModalRoute.isCurrentOf(context) != false &&
+                  TickerMode.of(context);
+              final experience = GameExperienceSettings.instance;
+              final autoRotate =
+                  !experience.effectiveReducedMotion &&
+                  !(MediaQuery.maybeOf(context)?.disableAnimations ?? false) &&
+                  (!GameConfig.advancedBatteryOptimizationEnabled ||
+                      !GameConfig.tokenAutoRotationPerformanceOnly ||
+                      experience.powerProfile == GamePowerProfile.performance);
               final selectedIndex = prefs.selectionFor(seat);
               final selected = prefs.styleFor(seat);
               return SafeArea(
@@ -145,7 +164,10 @@ class _TokenSettingsScreenState extends State<TokenSettingsScreen> {
                             children: [
                               SizedBox(
                                 height: 235,
-                                child: selected.modelAsset != null && showModel
+                                child:
+                                    selected.modelAsset != null &&
+                                        showModel &&
+                                        visible
                                     ? ClipRRect(
                                         borderRadius: BorderRadius.circular(16),
                                         child: ModelViewer(
@@ -155,7 +177,7 @@ class _TokenSettingsScreenState extends State<TokenSettingsScreen> {
                                           src: selected.modelAsset!,
                                           alt: selected.english,
                                           cameraControls: true,
-                                          autoRotate: true,
+                                          autoRotate: autoRotate,
                                           rotationPerSecond: '14deg',
                                           ar: false,
                                           backgroundColor: const Color(

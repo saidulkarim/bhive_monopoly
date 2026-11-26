@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../core/ui/app_notices.dart';
 import '../../core/ui/settled_modal.dart';
 import '../../core/ui/game_diagnostics.dart';
+import '../../core/config/game_config.dart';
 
 import '../engine/game_engine.dart';
 import '../experience/game_audio.dart';
@@ -26,6 +27,7 @@ import 'widgets/game_board_view.dart';
 import 'widgets/adaptive_board_panel.dart';
 import 'widgets/compact_players_strip.dart';
 import 'widgets/property_deed_card.dart';
+import 'widgets/property_buy_request.dart';
 import 'widgets/animated_deed_entrance.dart';
 import 'widgets/victory_standings_sheet.dart';
 import '../network/lan_reconnect_policy.dart';
@@ -570,6 +572,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
       await operation;
     } catch (error, stack) {
       GameDiagnostics.record('multiplayer action', error, stack);
+      // ignore: curly_braces_in_flow_control_structures
       if (mounted) {
         AppNotices.of(context).showSnackBar(
           SnackBar(
@@ -1403,7 +1406,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
     }).toList();
   }
 
-  Future<void> _openTradeDialog() async {
+  Future<void> _openTradeDialog({int? buyIndex}) async {
     if (_tradeDialogOpen || !mounted) return;
     final engine = game;
     final me = room.playerId;
@@ -1423,11 +1426,19 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
         )
         .toList();
     if (recipients.isEmpty) return;
-    int target = recipients.first.id;
+    final owner = buyIndex == null ? null : engine.properties[buyIndex].ownerId;
+    if (buyIndex != null &&
+        (!canRequestProperty(engine, me, buyIndex) ||
+            !recipients.any((p) => p.id == owner))) {
+      return;
+    }
+    int target = owner ?? recipients.first.id;
     final offered = <int>{};
-    final requested = <int>{};
+    final requested = <int>{?buyIndex};
     final openedTurn = engine.turnNumber;
-    final cashFrom = TextEditingController(text: '0');
+    final cashFrom = TextEditingController(
+      text: buyIndex == null ? '0' : '${engine.spaces[buyIndex].price}',
+    );
     final cashTo = TextEditingController(text: '0');
     final owned = _tradeableSpaces(me);
     _tradeDialogOpen = true;
@@ -1526,14 +1537,16 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                               child: Text(p.name),
                             ),
                         ],
-                        onChanged: (v) {
-                          if (v != null) {
-                            updateDialog(() {
-                              target = v;
-                              requested.clear();
-                            });
-                          }
-                        },
+                        onChanged: buyIndex != null
+                            ? null
+                            : (v) {
+                                if (v != null) {
+                                  updateDialog(() {
+                                    target = v;
+                                    requested.clear();
+                                  });
+                                }
+                              },
                       ),
                       const SizedBox(height: 11),
                       Text(
@@ -1655,6 +1668,38 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                       Navigator.pop(dialogContext);
                       return;
                     }
+                    if (buyIndex != null) {
+                      if (from <= 0 ||
+                          to != 0 ||
+                          offered.isNotEmpty ||
+                          requested.length != 1 ||
+                          !requested.contains(buyIndex) ||
+                          target != owner) {
+                        AppNotices.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              t.choose(
+                                'Enter a positive purchase price for the selected property.',
+                                'নির্বাচিত সম্পত্তির জন্য ধনাত্মক ক্রয়মূল্য লিখুন।',
+                              ),
+                            ),
+                          ),
+                        );
+                        return;
+                      }
+                      try {
+                        game!.validateTrade(
+                          propertyBuyOffer(me, target, buyIndex, from),
+                        );
+                      } on GameRuleException catch (error) {
+                        AppNotices.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(t.errorMessage(error.message)),
+                          ),
+                        );
+                        return;
+                      }
+                    }
                     submitted = true;
                     Navigator.pop(dialogContext);
                     unawaited(
@@ -1676,6 +1721,20 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
           },
         ),
       );
+    } catch (error, stack) {
+      GameDiagnostics.record('network trade dialog', error, stack);
+      if (mounted) {
+        AppNotices.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              t.choose(
+                'Trade interrupted. Check the current game before retrying.',
+                'বিনিময় বাধাগ্রস্ত হয়েছে। আবার চেষ্টা করার আগে খেলার অবস্থা যাচাই করুন।',
+              ),
+            ),
+          ),
+        );
+      }
     } finally {
       _tradeDialogOpen = false;
       cashFrom.dispose();
@@ -1785,6 +1844,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
     if (!mounted || _propertyModalOpen) return;
     final engine = game;
     if (engine == null) return;
+    final openedTurn = engine.turnNumber;
     final tile = engine.spaces[index];
     final property = engine.properties[index];
     final ownedByMe = property.ownerId == room.playerId;
@@ -1795,7 +1855,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
         ownedByMe;
     _propertyModalOpen = true;
     try {
-      await showSettledSheet<void>(
+      final buy = await showSettledSheet<bool>(
         context: context,
         isScrollControlled: true,
         backgroundColor: const Color(0xFF1B3031),
@@ -1857,6 +1917,26 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                         }),
                       const SizedBox(height: 9),
                     ],
+                    if (GameConfig.propertyBuyRequestEnabled &&
+                        GameConfig.humanPropertyBuyRequestEnabled &&
+                        _canUseBoardActions &&
+                        room.playerId != null &&
+                        canRequestProperty(engine, room.playerId!, index)) ...[
+                      if (GameConfig.colorGroupRecommendationEnabled &&
+                          completesPurchaseGroup(engine, room.playerId!, index))
+                        Text(
+                          t.choose(
+                            'Complete your color group with this property.',
+                            'এই সম্পত্তি কিনলে একই রঙের সেট সম্পূর্ণ হবে।',
+                          ),
+                        ),
+                      _primary(
+                        t.choose('REQUEST TO BUY', 'কেনার প্রস্তাব দিন'),
+                        Icons.shopping_cart_outlined,
+                        () => Navigator.pop(ctx, true),
+                      ),
+                      const SizedBox(height: 9),
+                    ],
                     _secondary(
                       t.choose('CLOSE', 'বন্ধ করুন'),
                       () => Navigator.pop(ctx),
@@ -1868,6 +1948,13 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
           ),
         ),
       );
+      if (mounted &&
+          buy == true &&
+          _canUseBoardActions &&
+          game?.turnNumber == openedTurn &&
+          game?.properties[index].ownerId == property.ownerId) {
+        await _openTradeDialog(buyIndex: index);
+      }
     } finally {
       _propertyModalOpen = false;
       if (mounted) _scheduleDecisionPrompt();

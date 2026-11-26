@@ -3,6 +3,7 @@ import 'package:pdfx/pdfx.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../game/ui/game_typography.dart';
+import 'rules_screen.dart';
 
 /// Language-specific, bundled PDF guide for Android and Web.
 /// No network request is needed to load the guide asset itself.
@@ -65,6 +66,16 @@ class _PlayGuideScreenState extends State<PlayGuideScreen> {
       appBar: AppBar(
         backgroundColor: AppTheme.obsidian,
         foregroundColor: AppTheme.gold,
+        actions: [
+          IconButton(
+            key: const ValueKey<String>('play-guide-live-rules'),
+            tooltip: _bn ? 'হালনাগাদ নিয়ম' : 'Updated rules',
+            icon: const Icon(Icons.rule_rounded),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const RulesScreen()),
+            ),
+          ),
+        ],
         title: Text(
           _bn ? 'খেলার নির্দেশিকা' : 'How to Play',
           style: TextStyle(
@@ -82,8 +93,8 @@ class _PlayGuideScreenState extends State<PlayGuideScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Text(
                 _bn
-                    ? 'পৃষ্ঠা পরিবর্তন করতে সোয়াইপ করুন; বড় করে দেখতে দুই আঙুল ব্যবহার করুন।'
-                    : 'Swipe to change pages; pinch to zoom in.',
+                    ? 'পৃষ্ঠা পরিবর্তন করতে সোয়াইপ করুন; বড় করতে দুই আঙুল ব্যবহার করুন। শেষের সংযোজনে নতুন নিয়ম রয়েছে।'
+                    : 'Swipe to change pages; pinch to zoom. See the final appendix for updated rules.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white70,
