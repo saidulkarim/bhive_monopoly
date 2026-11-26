@@ -21,10 +21,10 @@ class FontChoice {
 class FontCatalog {
   const FontCatalog._();
 
-  static const String defaultBangla = 'KarnaphuliMJ';
+  static const String defaultBangla = 'NotoSansBengali';
   static const String defaultEnglish = 'Exo2';
 
-  /// The user's saved default remains KarnaphuliMJ. The currently bundled
+  /// KarnaphuliMJ remains an optional preference. The currently bundled
   /// legacy MJ font appears unable to shape this app's Unicode Bangla text
   /// correctly (see the settings-drawer screenshots). Merely adding a font
   /// fallback does NOT fix a glyph that is present but mapped incorrectly.
@@ -48,11 +48,14 @@ class FontCatalog {
   ) => fallbacks(languageCode, renderFamily(languageCode, selectedFamily));
 
   static const List<FontChoice> banglaFonts = <FontChoice>[
-    // Requested app default. This family must match pubspec.yaml exactly.
-    // A Unicode-mapped font is required to render Unicode Bangla faithfully.
+    FontChoice(
+      family: 'NotoSansBengali',
+      label: 'Noto Sans Bengali (default)',
+      languageCode: 'bn',
+    ),
     FontChoice(
       family: 'KarnaphuliMJ',
-      label: 'KarnaphuliMJ (default)',
+      label: 'KarnaphuliMJ',
       languageCode: 'bn',
     ),
     FontChoice(family: 'Nikosh', label: 'Nikosh', languageCode: 'bn'),
@@ -96,7 +99,7 @@ class FontCatalog {
     // Keep the fixed fallback priority while supporting future font additions.
     final allowed = forLanguage(languageCode);
     final candidates = languageCode == 'bn'
-        ? const <String>['Nikosh', 'NikoshBAN']
+        ? const <String>['NotoSansBengali', 'Nikosh', 'NikoshBAN']
         : const <String>['Exo2'];
 
     return candidates

@@ -67,8 +67,15 @@ class MatchStandings {
     rows.sort((a, b) {
       if (a.winner != b.winner) return a.winner ? -1 : 1;
       if (a.bankrupt != b.bankrupt) return a.bankrupt ? 1 : -1;
+      if (game.finishedByTurnLimit) {
+        final byWorth = game
+            .netWorth(b.playerId)
+            .compareTo(game.netWorth(a.playerId));
+        if (byWorth != 0) return byWorth;
+      }
       final byCash = b.balance.compareTo(a.balance);
       if (byCash != 0) return byCash;
+      if (game.finishedByTurnLimit) return a.playerId.compareTo(b.playerId);
       final byProperties = b.properties.compareTo(a.properties);
       if (byProperties != 0) return byProperties;
       return a.playerId.compareTo(b.playerId);

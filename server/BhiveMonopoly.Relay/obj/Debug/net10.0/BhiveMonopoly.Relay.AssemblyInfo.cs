@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("BhiveMonopoly.Relay")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+ccfb8b01d46792bb009d5559d7531e61556c8e40")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+86dbb3f5f1b1d3f3621245018941d2c4aef09c9a")]
 [assembly: System.Reflection.AssemblyProductAttribute("BhiveMonopoly.Relay")]
 [assembly: System.Reflection.AssemblyTitleAttribute("BhiveMonopoly.Relay")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

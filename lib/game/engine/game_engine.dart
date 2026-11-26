@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import '../core/board_data.dart';
+import '../../core/config/game_config.dart';
 import '../models/game_models.dart';
 import '../models/activity_event.dart';
 import '../validation/game_snapshot_validator.dart';
@@ -12,6 +13,7 @@ class GameEngine {
     required List<String> playerNames,
     int? cardSeed,
     List<int>? colorIndices,
+    this.maximumTurns,
   }) : players = List<PlayerState>.generate(
          playerNames.length,
          (i) => PlayerState(
@@ -23,6 +25,11 @@ class GameEngine {
          ),
        ),
        properties = List<PropertyState>.generate(40, (_) => PropertyState()) {
+    if (maximumTurns != null &&
+        (maximumTurns! < GameConfig.customMatchMinimumTurns ||
+            maximumTurns! > GameConfig.customMatchMaximumTurns)) {
+      throw const GameRuleException('Invalid match turn limit.');
+    }
     if (players.length < 2 ||
         players.length > 6 ||
         players.any((p) => p.name.isEmpty)) {
@@ -42,6 +49,28 @@ class GameEngine {
       actors: [players.first.name],
     );
   }
+
+  /// Null preserves the original bankruptcy-only rules and legacy saves.
+  final int? maximumTurns;
+  bool get finishedByTurnLimit =>
+      phase == TurnPhase.gameOver &&
+      maximumTurns != null &&
+      turnNumber >= maximumTurns! &&
+      players.where((p) => !p.bankrupt).length > 1;
+  int netWorth(int id) =>
+      players[id].balance +
+      spaces
+          .where((s) => properties[s.index].ownerId == id)
+          .fold<int>(
+            0,
+            (sum, s) =>
+                sum +
+                propertyNetWorth(
+                  s,
+                  properties[s.index].development,
+                  properties[s.index].mortgaged,
+                ),
+          );
 
   final List<PlayerState> players;
   final List<PropertyState> properties;
@@ -555,6 +584,17 @@ class GameEngine {
       _updateWinner();
       return;
     }
+    if (maximumTurns != null && turnNumber >= maximumTurns!) {
+      final active = players.where((p) => !p.bankrupt).toList()
+        ..sort((a, b) {
+          final byWorth = netWorth(b.id).compareTo(netWorth(a.id));
+          if (byWorth != 0) return byWorth;
+          final byCash = b.balance.compareTo(a.balance);
+          return byCash != 0 ? byCash : a.id.compareTo(b.id);
+        });
+      _finishWithWinner(active.first.id);
+      return;
+    }
     do {
       currentPlayerId = (currentPlayerId + 1) % players.length;
     } while (currentPlayer.bankrupt);
@@ -848,7 +888,11 @@ class GameEngine {
   }
 
   void _updateWinner() {
-    winnerId = players.firstWhere((p) => !p.bankrupt).id;
+    _finishWithWinner(players.firstWhere((p) => !p.bankrupt).id);
+  }
+
+  void _finishWithWinner(int id) {
+    winnerId = id;
     phase = TurnPhase.gameOver;
     _log(
       '${players[winnerId!].name} wins bHiVE Monopoly!',
@@ -973,6 +1017,7 @@ class GameEngine {
   /// Treat input as untrusted local data; validate before using it.
   Map<String, dynamic> exportSave() => <String, dynamic>{
     'schema': 1,
+    if (maximumTurns != null) 'maximumTurns': maximumTurns,
     'players': <Map<String, dynamic>>[
       for (final p in players)
         <String, dynamic>{
@@ -1041,6 +1086,7 @@ class GameEngine {
       }
       final game = GameEngine(
         playerNames: playerData.map((p) => p['name'] as String).toList(),
+        maximumTurns: json['maximumTurns'] as int?,
       );
       bool validPlayerId(int? id) =>
           id == null || (id >= 0 && id < game.players.length);

@@ -126,3 +126,10 @@ class GameRuleException implements Exception {
   @override
   String toString() => message;
 }
+
+/// Agreed score for turn-limited matches: printed title value less the
+/// redemption cost of a mortgage, plus half the building investment.
+int propertyNetWorth(BoardSpace tile, int development, bool mortgaged) {
+  final redemption = mortgaged ? ((tile.price ~/ 2) * 11 + 9) ~/ 10 : 0;
+  return tile.price - redemption + (tile.buildCost * development ~/ 2);
+}

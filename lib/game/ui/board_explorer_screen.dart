@@ -6,6 +6,8 @@ import '../experience/game_experience_settings.dart';
 import '../models/game_models.dart';
 import 'game_text.dart';
 import 'widgets/game_board_view.dart';
+import 'widgets/turn_assist.dart';
+import '../../core/config/game_config.dart';
 import 'widgets/compact_players_strip.dart';
 import 'widgets/smart_board_focus_controller.dart';
 
@@ -184,106 +186,121 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen>
           ),
         ],
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                children: [
-                  _modeButton(
-                    '2D',
-                    !_threeD,
-                    () => setState(() => _threeD = false),
-                  ),
-                  const SizedBox(width: 8),
-                  _modeButton(
-                    '3D',
-                    _threeD,
-                    () => setState(() => _threeD = true),
-                  ),
-                  const Spacer(),
-                  TextButton.icon(
-                    onPressed: () => setState(() => _showList = !_showList),
-                    icon: Icon(_showList ? Icons.grid_on : Icons.list),
-                    label: Text(
-                      t.choose(
-                        _showList ? 'Board' : 'All 40',
-                        _showList ? 'বোর্ড' : '৪০ ঘর',
+      body: TurnAssist(
+        turnKey:
+            currentGame.phase == TurnPhase.complete &&
+                (widget.actionEnabled?.call() ?? widget.canAct)
+            ? '${currentGame.turnNumber}:${currentGame.currentPlayerId}'
+            : null,
+        eligible: () =>
+            (widget.gameProvider?.call() ?? widget.game).phase ==
+                TurnPhase.complete &&
+            (widget.actionEnabled?.call() ?? widget.canAct),
+        text: t,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                child: Row(
+                  children: [
+                    _modeButton(
+                      '2D',
+                      !_threeD,
+                      () => setState(() => _threeD = false),
+                    ),
+                    const SizedBox(width: 8),
+                    _modeButton(
+                      '3D',
+                      _threeD,
+                      () => setState(() => _threeD = true),
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: () => setState(() => _showList = !_showList),
+                      icon: Icon(_showList ? Icons.grid_on : Icons.list),
+                      label: Text(
+                        t.choose(
+                          _showList ? 'Board' : 'All 40',
+                          _showList ? 'বোর্ড' : '৪০ ঘর',
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            // Always-visible scrollable cash ranking in full-screen play.
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Semantics(
-                label: t.choose(
-                  'Player cash balances and cash leader',
-                  'খেলোয়াড়দের নগদ অর্থ ও সর্বোচ্চ নগদ',
-                ),
-                child: CompactPlayersStrip(
-                  key: const ValueKey<String>('explorer-cash-leaderboard'),
-                  game: currentGame,
-                  text: t,
+                  ],
                 ),
               ),
-            ),
-            Expanded(
-              child: _showList
-                  ? _tileList()
-                  : LayoutBuilder(
-                      builder: (context, box) {
-                        _boardSide = box.biggest.shortestSide;
-                        return GameBoardView(
-                          engine: currentGame,
-                          text: t,
-                          onSelect: _select,
-                          perspective: true,
-                          cameraOverride: _threeD
-                              ? BoardCameraPreset.tabletop
-                              : BoardCameraPreset.topDown,
-                          transformationController: _transform,
-                          onInteractionStart: (_) => _focus.pause(),
-                          visiblePositions: widget.visiblePositions,
-                          dicePreview:
-                              widget.diceValueProvider?.call() ??
-                              widget.dicePreview,
-                          diceRolling:
-                              widget.isRollingProvider?.call() ??
-                              widget.diceRolling,
-                          onRoll: widget.onRoll,
-                          onEndTurn: widget.onEndTurn,
-                          canAct: widget.canAct,
-                          actionEnabled: widget.actionEnabled,
-                          // The inline status itself is the action button;
-                          // never add a second large REVIEW OPTIONS panel.
-                          onReviewDecision: widget.onReviewDecision,
-                          decisionEnabled: widget.decisionEnabled,
-                          onViewActivity: widget.onViewActivity,
-                        );
-                      },
-                    ),
-            ),
-            if (!_showList) _zoomToolbar(t),
-            if (!_showList)
+              // Always-visible scrollable cash ranking in full-screen play.
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 5, 12, 12),
-                child: Text(
-                  t.choose(
-                    'Pinch to zoom • Drag to pan • Tap a space for details',
-                    'দুই আঙুলে বড় করুন • সরিয়ে দেখুন • তথ্যের জন্য ঘর চাপুন',
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Semantics(
+                  label: t.choose(
+                    'Player cash balances and cash leader',
+                    'খেলোয়াড়দের নগদ অর্থ ও সর্বোচ্চ নগদ',
                   ),
-                  textAlign: TextAlign.center,
-                  style: textStyle.copyWith(
-                    color: Colors.white70,
-                    fontSize: 12,
+                  child: CompactPlayersStrip(
+                    key: const ValueKey<String>('explorer-cash-leaderboard'),
+                    game: currentGame,
+                    text: t,
                   ),
                 ),
               ),
-          ],
+              Expanded(
+                child: _showList
+                    ? _tileList()
+                    : LayoutBuilder(
+                        builder: (context, box) {
+                          _boardSide = box.biggest.shortestSide;
+                          return GameBoardView(
+                            engine: currentGame,
+                            text: t,
+                            onSelect: _select,
+                            perspective: true,
+                            cameraOverride: _threeD
+                                ? BoardCameraPreset.tabletop
+                                : BoardCameraPreset.topDown,
+                            transformationController: _transform,
+                            onInteractionStart: (_) => _focus.pause(),
+                            visiblePositions: widget.visiblePositions,
+                            dicePreview:
+                                widget.diceValueProvider?.call() ??
+                                widget.dicePreview,
+                            diceRolling:
+                                widget.isRollingProvider?.call() ??
+                                widget.diceRolling,
+                            onRoll: widget.onRoll,
+                            onEndTurn: widget.onEndTurn,
+                            canAct: widget.canAct,
+                            actionEnabled: widget.actionEnabled,
+                            // The inline status itself is the action button;
+                            // never add a second large REVIEW OPTIONS panel.
+                            onReviewDecision: widget.onReviewDecision,
+                            decisionEnabled: widget.decisionEnabled,
+                            onViewActivity: widget.onViewActivity,
+                          );
+                        },
+                      ),
+              ),
+              if (!_showList) _zoomToolbar(t),
+              if (!_showList)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 5, 12, 12),
+                  child: Text(
+                    t.choose(
+                      'Pinch to zoom • Drag to pan • Tap a space for details',
+                      'দুই আঙুলে বড় করুন • সরিয়ে দেখুন • তথ্যের জন্য ঘর চাপুন',
+                    ),
+                    textAlign: TextAlign.center,
+                    style: textStyle.copyWith(
+                      color: Colors.white70,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -396,7 +413,14 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen>
         return Padding(
           padding: const EdgeInsets.only(bottom: 7),
           child: Material(
-            color: const Color(0xFF1A3333),
+            color: property.mortgaged
+                ? Color.alphaBlend(
+                    const Color(
+                      GameConfig.mortgageOverlayColor,
+                    ).withValues(alpha: GameConfig.mortgageOverlayOpacity),
+                    const Color(0xFF1A3333),
+                  )
+                : const Color(0xFF1A3333),
             borderRadius: BorderRadius.circular(11),
             child: ListTile(
               onTap: () => _select(index),
@@ -421,14 +445,36 @@ class _BoardExplorerScreenState extends State<BoardExplorerScreen>
                     : '${t.choose('Owner', 'মালিক')}: ${game.players[property.ownerId!].name}',
                 style: style.copyWith(color: Colors.white70, fontSize: 12),
               ),
-              trailing: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 98),
-                child: Text(
-                  tile.price > 0 ? t.money(tile.price) : '—',
-                  textAlign: TextAlign.end,
-                  style: style.copyWith(color: kBoardGold, fontSize: 14),
-                ),
-              ),
+              trailing: property.mortgaged
+                  ? Tooltip(
+                      message: t.choose(
+                        'Mortgaged — no rent',
+                        'বন্ধক রাখা হয়েছে — ভাড়া নেই',
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.lock_rounded,
+                            color: Colors.white,
+                            size: 24,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            t.money(tile.price),
+                            style: style.copyWith(color: kBoardGold),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 98),
+                      child: Text(
+                        tile.price > 0 ? t.money(tile.price) : '—',
+                        textAlign: TextAlign.end,
+                        style: style.copyWith(color: kBoardGold, fontSize: 14),
+                      ),
+                    ),
             ),
           ),
         );

@@ -1,4 +1,5 @@
 import '../core/board_data.dart';
+import '../../core/config/game_config.dart';
 import '../models/game_models.dart';
 
 /// Validates *untrusted serialized data* before it can change a live game.
@@ -160,7 +161,18 @@ class GameSnapshotValidator {
       min: 0,
       max: players.length - 1,
     );
-    _int(data['turnNumber'], 'turn number', min: 1);
+    final turnNumber = _int(data['turnNumber'], 'turn number', min: 1);
+    final maximumTurns = offline && data['maximumTurns'] != null
+        ? _int(
+            data['maximumTurns'],
+            'match turn limit',
+            min: GameConfig.customMatchMinimumTurns,
+            max: GameConfig.customMatchMaximumTurns,
+          )
+        : null;
+    if (maximumTurns != null && turnNumber > maximumTurns) {
+      throw const FormatException('Match turn limit exceeded.');
+    }
     final phaseName = data['phase'];
     if (phaseName is! String ||
         !TurnPhase.values.any((phase) => phase.name == phaseName)) {
@@ -231,10 +243,41 @@ class GameSnapshotValidator {
     final winner = _optionalId(data['winnerId'], 'winner', players.length);
     _optionalId(data['debtCreditorId'], 'creditor', players.length);
     if (phase == TurnPhase.gameOver) {
-      if (winner == null ||
-          bankrupt[winner] ||
-          bankrupt.where((b) => !b).length != 1) {
+      if (winner == null || bankrupt[winner]) {
         throw const FormatException('Invalid finished game.');
+      }
+      if (bankrupt.where((b) => !b).length != 1) {
+        if (maximumTurns == null || turnNumber != maximumTurns) {
+          throw const FormatException('Invalid finished game.');
+        }
+        final cash = [
+          for (final p in players) _map(p, 'player')['balance'] as int,
+        ];
+        final worth = List<int>.of(cash);
+        for (var i = 0; i < properties.length; i++) {
+          final p = _map(properties[i], 'property');
+          final owner = p['ownerId'] as int?;
+          if (owner != null) {
+            worth[owner] += propertyNetWorth(
+              BoardData.spaces[i],
+              p['development'] as int,
+              p['mortgaged'] as bool,
+            );
+          }
+        }
+        final active =
+            [
+              for (var i = 0; i < players.length; i++)
+                if (!bankrupt[i]) i,
+            ]..sort((a, b) {
+              final byWorth = worth[b].compareTo(worth[a]);
+              if (byWorth != 0) return byWorth;
+              final byCash = cash[b].compareTo(cash[a]);
+              return byCash != 0 ? byCash : a.compareTo(b);
+            });
+        if (winner != active.first) {
+          throw const FormatException('Invalid turn-limited winner.');
+        }
       }
     } else if (winner != null) {
       throw const FormatException('Winner assigned before game completion.');

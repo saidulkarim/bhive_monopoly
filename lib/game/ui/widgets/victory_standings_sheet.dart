@@ -4,6 +4,7 @@ import '../../engine/game_engine.dart';
 import '../../experience/game_experience_settings.dart';
 import '../../presentation/match_standings.dart';
 import '../game_text.dart';
+import 'victory_confetti.dart';
 
 const _gold = Color(0xFFE9BE67);
 const _background = Color(0xFF142B2D);
@@ -74,11 +75,7 @@ class VictoryStandingsSheet extends StatelessWidget {
                 curve: Curves.easeOutBack,
                 builder: (context, scale, child) =>
                     Transform.scale(scale: scale, child: child),
-                child: const Icon(
-                  Icons.emoji_events_rounded,
-                  color: _gold,
-                  size: 52,
-                ),
+                child: const PremiumVictoryTrophy(),
               ),
               const SizedBox(height: 10),
               Text(
@@ -108,10 +105,15 @@ class VictoryStandingsSheet extends StatelessWidget {
               ],
               const SizedBox(height: 7),
               Text(
-                text.choose(
-                  'The winner is determined by the game rules. Other players are ordered by final cash, not net worth.',
-                  'বিজয়ী গেমের নিয়ম অনুযায়ী নির্ধারিত। অন্য খেলোয়াড়দের চূড়ান্ত নগদ অর্থ অনুযায়ী সাজানো হয়েছে, মোট সম্পদ অনুযায়ী নয়।',
-                ),
+                game.finishedByTurnLimit
+                    ? text.choose(
+                        'Turn limit reached. Highest net worth wins; ties use cash, then seat order.',
+                        'চালের সীমা পূর্ণ হয়েছে। সর্বোচ্চ নিট সম্পদ বিজয় নির্ধারণ করে; সমান হলে নগদ, পরে আসনক্রম বিবেচিত হয়।',
+                      )
+                    : text.choose(
+                        'The winner is determined by the game rules. Other players are ordered by final cash, not net worth.',
+                        'বিজয়ী গেমের নিয়ম অনুযায়ী নির্ধারিত। অন্য খেলোয়াড়দের চূড়ান্ত নগদ অর্থ অনুযায়ী সাজানো হয়েছে, মোট সম্পদ অনুযায়ী নয়।',
+                      ),
                 textAlign: TextAlign.center,
                 style: _label.copyWith(color: Colors.white60, fontSize: 12),
               ),
@@ -191,6 +193,11 @@ class VictoryStandingsSheet extends StatelessWidget {
                 Icons.account_balance_wallet_outlined,
                 text.choose('Cash', 'নগদ'),
                 text.money(row.balance),
+              ),
+              _metric(
+                Icons.assessment_outlined,
+                text.choose('Net worth', 'নিট সম্পদ'),
+                text.money(game.netWorth(row.playerId)),
               ),
               _metric(
                 Icons.home_work_outlined,

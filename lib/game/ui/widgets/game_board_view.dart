@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../engine/game_engine.dart';
+import '../../../core/config/game_config.dart';
 import '../../experience/board_camera_preset.dart';
 import '../../experience/gameplay_motion.dart';
 import '../../experience/game_experience_settings.dart';
@@ -308,9 +309,18 @@ class GameBoardView extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
-              color: kBoardDark,
+              color: state.mortgaged
+                  ? Color.alphaBlend(
+                      const Color(
+                        GameConfig.mortgageOverlayColor,
+                      ).withValues(alpha: GameConfig.mortgageOverlayOpacity),
+                      kBoardDark,
+                    )
+                  : kBoardDark,
               border: Border.all(
-                color: kBoardGold.withValues(alpha: 0.55),
+                color: state.mortgaged
+                    ? const Color(GameConfig.mortgageOverlayColor)
+                    : kBoardGold.withValues(alpha: 0.55),
                 width: 1.5,
               ),
             ),
@@ -386,14 +396,18 @@ class GameBoardView extends StatelessWidget {
                           fontFamilyFallback: text.fallbackFonts,
                         ),
                       ),
-                    if (state.mortgaged)
-                      const Icon(
-                        Icons.lock_outline,
-                        size: 12,
-                        color: Colors.redAccent,
-                      ),
                   ],
                 ),
+                if (state.mortgaged)
+                  const Positioned(
+                    top: 24,
+                    right: 0,
+                    child: Icon(
+                      Icons.lock_rounded,
+                      size: 12 * GameConfig.mortgageIconScale,
+                      color: Color(0xFFFFE0E0),
+                    ),
+                  ),
                 // Keep houses/hotels OUTSIDE the tile's vertical Column.
                 // Otherwise adding a building increases its minimum height
                 // and the 90.9-px board cells overflow in Flutter's renderer.

@@ -23,6 +23,9 @@ import 'experience_settings_screen.dart';
 import 'token_settings_screen.dart';
 import 'match_history_screen.dart';
 import 'widgets/victory_confetti.dart';
+import 'widgets/turn_assist.dart';
+import '../progression/match_progress.dart';
+import '../../core/config/game_config.dart';
 import 'widgets/game_board_view.dart';
 import 'widgets/adaptive_board_panel.dart';
 import 'widgets/compact_players_strip.dart';
@@ -43,6 +46,7 @@ class GameBoardScreen extends StatefulWidget {
     this.botDifficulties = const <int, BotDifficulty>{},
     this.resumedGame,
     this.matchId,
+    this.maximumTurns,
   });
 
   final List<String> playerNames;
@@ -50,6 +54,7 @@ class GameBoardScreen extends StatefulWidget {
   final Map<int, BotDifficulty> botDifficulties;
   final GameEngine? resumedGame;
   final String? matchId;
+  final int? maximumTurns;
 
   @override
   State<GameBoardScreen> createState() => _GameBoardScreenState();
@@ -61,6 +66,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
   late final GameText t;
   final Random _random = Random();
   final BotController _botController = BotController();
+  int _lastBotTradeTurn = -100000;
   Timer? _botTimer;
   final Map<int, int> _visiblePositions = <int, int>{};
   DiceRoll? _dicePreview;
@@ -68,6 +74,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
   bool _busy = false;
   Future<void>? _completedHistoryWrite;
   final TextEditingController bidController = TextEditingController();
+  final MatchProgress _progress = MatchProgress();
   final ValueNotifier<int> _boardUpdates = ValueNotifier<int>(0);
   final ValueNotifier<int> _decisionRevision = ValueNotifier<int>(0);
   bool _decisionOpen = false;
@@ -249,6 +256,23 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
     ),
   );
 
+  void _observeProgress(GameEngine engine) {
+    if (!_progress.observe(engine)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || engine.phase == TurnPhase.gameOver) return;
+      AppNotices.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            t.choose(
+              'Strategic deadlock detected. Consider trading properties or building houses.',
+              'খেলায় কৌশলগত স্থবিরতা দেখা দিয়েছে। সম্পত্তি বিনিময় বা বাড়ি নির্মাণের কথা বিবেচনা করুন।',
+            ),
+          ),
+        ),
+      );
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -259,6 +283,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
         widget.resumedGame ??
         GameEngine(
           playerNames: widget.playerNames,
+          maximumTurns: widget.maximumTurns,
           colorIndices: PlayerColorPreferences.instance.selections,
         );
     t = GameText(widget.languageCode);
@@ -269,6 +294,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      _observeProgress(game);
       _queueBot();
       _scheduleDecisionPrompt();
       if (widget.resumedGame == null) _persist();
@@ -324,6 +350,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
       } else if (game.turnNumber != previousTurn) {
         GameAudio.instance.fire(GameSfx.turn);
       }
+      _observeProgress(game);
       _persist();
       _updateBoard();
       _decisionRevision.value++;
@@ -427,13 +454,60 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
   void _queueBot() {
     _botTimer?.cancel();
     if (!mounted || _busy || _actingBotId == null) return;
-    _botTimer = Timer(const Duration(milliseconds: 430), _runBot);
+    _botTimer = Timer(
+      const Duration(milliseconds: GameConfig.aiActionDelayMilliseconds),
+      () {
+        try {
+          _runBot();
+        } catch (error, stack) {
+          GameDiagnostics.record('AI turn', error, stack);
+          if (mounted) {
+            AppNotices.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  t.choose(
+                    'Computer turn interrupted. Return to the last saved match if needed.',
+                    'কম্পিউটারের চাল বাধাগ্রস্ত হয়েছে। প্রয়োজনে সর্বশেষ সংরক্ষিত খেলায় ফিরে যান।',
+                  ),
+                ),
+              ),
+            );
+          }
+        }
+      },
+    );
   }
 
   void _runBot() {
     if (!mounted || _busy) return;
     final id = _actingBotId;
     if (id == null) return;
+    if (_progress.stagnant &&
+        game.turnNumber - _lastBotTradeTurn >=
+            GameConfig.aiTradeCooldownTurns) {
+      final offer = findReciprocalBotTrade(
+        game,
+        widget.botDifficulties.keys.toSet(),
+      );
+      if (offer != null) {
+        _lastBotTradeTurn = game.turnNumber;
+        if (_run(() => game.acceptTrade(offer))) return;
+      } else if (ModalRoute.of(context)?.isCurrent == true) {
+        final humanOffer = findReciprocalBotTrade(
+          game,
+          widget.botDifficulties.keys.toSet(),
+          recipientIds: {
+            for (final p in game.players)
+              if (!_isBot(p.id)) p.id,
+          },
+        );
+        if (humanOffer != null) {
+          _lastBotTradeTurn = game.turnNumber;
+          unawaited(_askHumanTrade(humanOffer));
+          return;
+        }
+      }
+    }
     final decision = _botController.choose(
       game,
       playerId: id,
@@ -481,6 +555,71 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
       case BotAction.endTurn:
         _run(game.endTurn);
         return;
+    }
+  }
+
+  Future<void> _askHumanTrade(TradeOffer offer) async {
+    final turn = game.turnNumber;
+    if (!mounted || _busy) return;
+    setState(() => _busy = true);
+    _updateBoard();
+    try {
+      final incoming = offer.propertiesFrom.single;
+      final outgoing = offer.propertiesTo.single;
+      final sender = game.players[offer.fromPlayerId].name;
+      final receiver = game.players[offer.toPlayerId].name;
+      final accepted = await showSettledDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(
+            t.choose('Computer trade proposal', 'কম্পিউটারের বিনিময় প্রস্তাব'),
+          ),
+          content: Text(
+            t.choose(
+              '$sender offers $receiver ${t.spaceName(incoming, game.spaces[incoming].name)} in exchange for ${t.spaceName(outgoing, game.spaces[outgoing].name)}. Both players complete a color group. No cash changes hands.',
+              '$sender, $receiver-কে ${t.spaceName(incoming, game.spaces[incoming].name)} এর বিনিময়ে ${t.spaceName(outgoing, game.spaces[outgoing].name)} নেওয়ার প্রস্তাব দিয়েছে। উভয়ের একই রঙের সম্পত্তির সেট সম্পূর্ণ হবে। কোনো টাকা লেনদেন হবে না।',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(t.choose('DECLINE', 'প্রত্যাখ্যান')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(t.choose('ACCEPT', 'গ্রহণ')),
+            ),
+          ],
+        ),
+      );
+      if (!mounted ||
+          accepted != true ||
+          game.turnNumber != turn ||
+          game.currentPlayerId != offer.fromPlayerId ||
+          game.phase != TurnPhase.complete) {
+        return;
+      }
+      _run(() => game.acceptTrade(offer), scheduleBot: false);
+    } catch (error, stack) {
+      GameDiagnostics.record('AI trade proposal', error, stack);
+      if (mounted) {
+        AppNotices.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              t.choose(
+                'Trade interrupted. Check the current game.',
+                'বিনিময় বাধাগ্রস্ত হয়েছে। খেলার বর্তমান অবস্থা যাচাই করুন।',
+              ),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+        _updateBoard();
+        _queueBot();
+      }
     }
   }
 
@@ -679,142 +818,160 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
       ),
       // Primary roll/end-turn actions now live only on the board itself.
       bottomNavigationBar: null,
-      body: Stack(
-        children: [
-          SafeArea(
-            child: LayoutBuilder(
-              builder: (context, c) {
-                final wide = usesWideGameBoardLayout(c.biggest);
-                if (wide) {
-                  return Padding(
-                    padding: const EdgeInsets.all(15),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: AdaptiveBoardPanel(
-                            game: game,
-                            text: t,
-                            onSelect: (index) {
-                              if (!_busy && _actingBotId == null) {
-                                _showTile(index);
-                              }
-                            },
-                            visiblePositions: _visiblePositions,
-                            dicePreview: _dicePreview,
-                            diceRolling: _diceRolling,
-                            onRoll: _handleBoardDice,
-                            onEndTurn: _handleBoardEndTurn,
-                            canAct: _canHumanAct,
-                            actionEnabled: () => _canHumanAct,
-                            onReviewDecision: _openDecisionSheet,
-                            decisionEnabled: () =>
-                                _needsDecision && _canHumanAct,
-                            boardUpdates: _boardUpdates,
-                            diceValueProvider: () => _dicePreview,
-                            isRollingProvider: () => _diceRolling,
-                            onViewActivity: () => GameActivitySheet.show(
-                              context,
+      body: TurnAssist(
+        turnKey:
+            (_canHumanAct &&
+                !_propertyModalOpen &&
+                !_decisionOpen &&
+                game.phase == TurnPhase.complete)
+            ? '${game.turnNumber}:${game.currentPlayerId}'
+            : null,
+        eligible: () =>
+            _canHumanAct &&
+            !_propertyModalOpen &&
+            !_decisionOpen &&
+            game.phase == TurnPhase.complete,
+        text: t,
+        onAutoEnd: _handleBoardEndTurn,
+        child: Stack(
+          children: [
+            SafeArea(
+              child: LayoutBuilder(
+                builder: (context, c) {
+                  final wide = usesWideGameBoardLayout(c.biggest);
+                  if (wide) {
+                    return Padding(
+                      padding: const EdgeInsets.all(15),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: AdaptiveBoardPanel(
+                              game: game,
                               text: t,
-                              events: List<String>.of(game.log),
-                              players: game.players,
-                              structuredEvents: game.activityEvents,
+                              onSelect: (index) {
+                                if (!_busy && _actingBotId == null) {
+                                  _showTile(index);
+                                }
+                              },
+                              visiblePositions: _visiblePositions,
+                              dicePreview: _dicePreview,
+                              diceRolling: _diceRolling,
+                              onRoll: _handleBoardDice,
+                              onEndTurn: _handleBoardEndTurn,
+                              canAct: _canHumanAct,
+                              actionEnabled: () => _canHumanAct,
+                              onReviewDecision: _openDecisionSheet,
+                              decisionEnabled: () =>
+                                  _needsDecision && _canHumanAct,
+                              boardUpdates: _boardUpdates,
+                              diceValueProvider: () => _dicePreview,
+                              isRollingProvider: () => _diceRolling,
+                              onViewActivity: () => GameActivitySheet.show(
+                                context,
+                                text: t,
+                                events: List<String>.of(game.log),
+                                players: game.players,
+                                structuredEvents: game.activityEvents,
+                              ),
                             ),
                           ),
+                          const SizedBox(width: 16),
+                          SizedBox(
+                            width: 350,
+                            child: ListView(
+                              children: [
+                                _playerCards(),
+                                const SizedBox(height: 14),
+                                _turnPanel(),
+                                const SizedBox(height: 14),
+                                _eventsPanel(),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                  final boardSide = min(c.maxWidth - 24, 680.0);
+                  final needsDecision = _needsDecision;
+                  return ListView(
+                    padding: const EdgeInsets.all(12),
+                    children: [
+                      CompactPlayersStrip(game: game, text: t),
+                      if (needsDecision) ...[
+                        const SizedBox(height: 10),
+                        _decisionNotice(),
+                      ],
+                      if (game.phase == TurnPhase.gameOver) ...<Widget>[
+                        const SizedBox(height: 10),
+                        _turnPanel(),
+                      ],
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: boardSide + 76,
+                        child: AdaptiveBoardPanel(
+                          game: game,
+                          text: t,
+                          onSelect: (index) {
+                            if (!_busy && _actingBotId == null) {
+                              _showTile(index);
+                            }
+                          },
+                          visiblePositions: _visiblePositions,
+                          dicePreview: _dicePreview,
+                          diceRolling: _diceRolling,
+                          onRoll: _handleBoardDice,
+                          onEndTurn: _handleBoardEndTurn,
+                          canAct: _canHumanAct,
+                          actionEnabled: () => _canHumanAct,
+                          onReviewDecision: _openDecisionSheet,
+                          decisionEnabled: () => _needsDecision && _canHumanAct,
+                          boardUpdates: _boardUpdates,
+                          diceValueProvider: () => _dicePreview,
+                          isRollingProvider: () => _diceRolling,
+                          onViewActivity: () => GameActivitySheet.show(
+                            context,
+                            text: t,
+                            events: List<String>.of(game.log),
+                            players: game.players,
+                            structuredEvents: game.activityEvents,
+                          ),
                         ),
-                        const SizedBox(width: 16),
-                        SizedBox(
-                          width: 350,
-                          child: ListView(
-                            children: [
-                              _playerCards(),
-                              const SizedBox(height: 14),
-                              _turnPanel(),
-                              const SizedBox(height: 14),
-                              _eventsPanel(),
-                            ],
+                      ),
+
+                      if (game.phase == TurnPhase.roll ||
+                          game.phase == TurnPhase.complete) ...<Widget>[
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: _busy || _actingBotId != null
+                              ? null
+                              : _showMyProperties,
+                          icon: const Icon(Icons.real_estate_agent_outlined),
+                          label: Text(
+                            t.choose('MY PROPERTIES', 'আমার সম্পত্তি'),
+                            style: TextStyle(
+                              fontFamily: t.font,
+                              fontFamilyFallback: t.fallbackFonts,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: kBoardGold,
+                            minimumSize: const Size.fromHeight(47),
+                            side: const BorderSide(color: kBoardGold),
                           ),
                         ),
                       ],
-                    ),
+                      const SizedBox(height: 12),
+                      _eventsPanel(),
+                    ],
                   );
-                }
-                final boardSide = min(c.maxWidth - 24, 680.0);
-                final needsDecision = _needsDecision;
-                return ListView(
-                  padding: const EdgeInsets.all(12),
-                  children: [
-                    CompactPlayersStrip(game: game, text: t),
-                    if (needsDecision) ...[
-                      const SizedBox(height: 10),
-                      _decisionNotice(),
-                    ],
-                    if (game.phase == TurnPhase.gameOver) ...<Widget>[
-                      const SizedBox(height: 10),
-                      _turnPanel(),
-                    ],
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      height: boardSide + 76,
-                      child: AdaptiveBoardPanel(
-                        game: game,
-                        text: t,
-                        onSelect: (index) {
-                          if (!_busy && _actingBotId == null) _showTile(index);
-                        },
-                        visiblePositions: _visiblePositions,
-                        dicePreview: _dicePreview,
-                        diceRolling: _diceRolling,
-                        onRoll: _handleBoardDice,
-                        onEndTurn: _handleBoardEndTurn,
-                        canAct: _canHumanAct,
-                        actionEnabled: () => _canHumanAct,
-                        onReviewDecision: _openDecisionSheet,
-                        decisionEnabled: () => _needsDecision && _canHumanAct,
-                        boardUpdates: _boardUpdates,
-                        diceValueProvider: () => _dicePreview,
-                        isRollingProvider: () => _diceRolling,
-                        onViewActivity: () => GameActivitySheet.show(
-                          context,
-                          text: t,
-                          events: List<String>.of(game.log),
-                          players: game.players,
-                          structuredEvents: game.activityEvents,
-                        ),
-                      ),
-                    ),
-
-                    if (game.phase == TurnPhase.roll ||
-                        game.phase == TurnPhase.complete) ...<Widget>[
-                      const SizedBox(height: 8),
-                      OutlinedButton.icon(
-                        onPressed: _busy || _actingBotId != null
-                            ? null
-                            : _showMyProperties,
-                        icon: const Icon(Icons.real_estate_agent_outlined),
-                        label: Text(
-                          t.choose('MY PROPERTIES', 'আমার সম্পত্তি'),
-                          style: TextStyle(
-                            fontFamily: t.font,
-                            fontFamilyFallback: t.fallbackFonts,
-                          ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: kBoardGold,
-                          minimumSize: const Size.fromHeight(47),
-                          side: const BorderSide(color: kBoardGold),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    _eventsPanel(),
-                  ],
-                );
-              },
+                },
+              ),
             ),
-          ),
-          if (game.phase == TurnPhase.gameOver)
-            const Positioned.fill(child: VictoryConfetti()),
-        ],
+            if (game.phase == TurnPhase.gameOver)
+              const Positioned.fill(child: VictoryConfetti()),
+          ],
+        ),
       ),
     );
   }
@@ -1164,13 +1321,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
       case TurnPhase.gameOver:
         final winner = game.players[game.winnerId!];
         return [
-          const Center(
-            child: Icon(
-              Icons.emoji_events_rounded,
-              color: kBoardGold,
-              size: 65,
-            ),
-          ),
+          const Center(child: PremiumVictoryTrophy()),
           Text(
             '${winner.name} ${t.choose('WINS!', 'বিজয়ী!')}',
             textAlign: TextAlign.center,
@@ -1620,16 +1771,68 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
         final difficulty = widget.botDifficulties[targetId];
         if (difficulty != null &&
             !_botController.acceptsTrade(game, offer, difficulty)) {
-          AppNotices.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                t.choose(
-                  'Computer player declined the offer.',
-                  'কম্পিউটার খেলোয়াড় প্রস্তাবটি প্রত্যাখ্যান করেছে।',
+          TradeOffer? counter;
+          for (final fraction in GameConfig.aiCounterOfferFractions) {
+            final alternative = TradeOffer(
+              fromPlayerId: seller,
+              toPlayerId: targetId,
+              propertiesFrom: [index],
+              cashTo: (cost * fraction).floor(),
+            );
+            if (alternative.cashTo <= 0 || alternative.cashTo >= cost) continue;
+            if (_botController.acceptsTrade(game, alternative, difficulty)) {
+              counter = alternative;
+              break;
+            }
+          }
+          final counterOffer = counter;
+          if (counterOffer != null && mounted) {
+            final accepted = await showSettledDialog<bool>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: Text(
+                  t.choose(
+                    'Computer counteroffer',
+                    'কম্পিউটারের পাল্টা প্রস্তাব',
+                  ),
+                ),
+                content: Text(
+                  t.choose(
+                    'The computer offers ${t.money(counterOffer.cashTo)} for this property. Accept?',
+                    'কম্পিউটার এই সম্পত্তির জন্য ${t.money(counterOffer.cashTo)} দিতে চায়। গ্রহণ করবেন?',
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: Text(t.choose('DECLINE', 'প্রত্যাখ্যান')),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: Text(t.choose('ACCEPT', 'গ্রহণ')),
+                  ),
+                ],
+              ),
+            );
+            if (accepted == true &&
+                mounted &&
+                game.currentPlayerId == seller &&
+                game.turnNumber == turn &&
+                _actingBotId == null) {
+              _run(() => game.acceptTrade(counterOffer));
+            }
+          } else if (mounted) {
+            AppNotices.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  t.choose(
+                    'Computer player declined the offer.',
+                    'কম্পিউটার খেলোয়াড় প্রস্তাবটি প্রত্যাখ্যান করেছে।',
+                  ),
                 ),
               ),
-            ),
-          );
+            );
+          }
         } else {
           _run(() => game.acceptTrade(offer));
         }

@@ -40,6 +40,7 @@ flutter:
     - assets/models/
     - assets/guides/
     - assets/icons/app_icon.png
+    - assets/fonts/Noto/NotoSansBengali-OFL.txt
 
   fonts:
     - family: Exo2
@@ -55,6 +56,20 @@ flutter:
           weight: 400
         - asset: assets/fonts/Exo2-Bold.ttf
           weight: 700
+
+    # Default Bangla Unicode font
+    - family: NotoSansBengali
+      fonts:
+        - asset: assets/fonts/Noto/NotoSansBengali-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Noto/NotoSansBengali-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Noto/NotoSansBengali-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Noto/NotoSansBengali-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Noto/NotoSansBengali-ExtraBold.ttf
+          weight: 800
 
     # Preferred Bangla font (configured in FontCatalog).
     - family: KarnaphuliMJ

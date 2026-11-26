@@ -146,7 +146,7 @@ void main() {
     final label = tester.element(find.text('বাংলা ভাষার নমুনা'));
     final theme = Theme.of(label);
     expect(theme.textTheme.bodyMedium!.fontSize!, greaterThan(14));
-    expect(theme.textTheme.bodyMedium!.fontFamily, 'Nikosh');
+    expect(theme.textTheme.bodyMedium!.fontFamily, 'NotoSansBengali');
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

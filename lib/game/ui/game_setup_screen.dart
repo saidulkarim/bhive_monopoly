@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../core/ui/app_notices.dart';
+import '../../core/config/game_config.dart';
 
 import '../ai/bot_controller.dart';
 import '../ai/bot_name_pool.dart';
@@ -40,6 +41,7 @@ class _GameSetupScreenState extends State<GameSetupScreen> {
   late final List<TextEditingController> names;
   int playerCount = 2;
   bool vsComputer = true;
+  int? maximumTurns;
   BotDifficulty difficulty = BotDifficulty.medium;
   SavedOfflineMatch? _resume;
   String? _loadError;
@@ -123,6 +125,42 @@ class _GameSetupScreenState extends State<GameSetupScreen> {
     }
   }
 
+  Future<void> _chooseCustomLimit() async {
+    var value = maximumTurns ?? GameConfig.standardMatchMaximumTurns;
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, update) => AlertDialog(
+          title: Text(t.choose('Maximum turns', 'সর্বোচ্চ চাল সংখ্যা')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(t.integer(value)),
+              Slider(
+                min: GameConfig.customMatchMinimumTurns.toDouble(),
+                max: GameConfig.customMatchMaximumTurns.toDouble(),
+                divisions: 39,
+                value: value.toDouble(),
+                onChanged: (v) => update(() => value = v.round()),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(t.choose('Cancel', 'বাতিল')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, value),
+              child: Text(t.choose('Confirm', 'নিশ্চিত করুন')),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (mounted && selected != null) setState(() => maximumTurns = selected);
+  }
+
   void _start() {
     final localNames = names
         .take(playerCount)
@@ -157,6 +195,7 @@ class _GameSetupScreenState extends State<GameSetupScreen> {
               languageCode: widget.languageCode,
               child: GameBoardScreen(
                 playerNames: configuredNames,
+                maximumTurns: maximumTurns,
                 languageCode: widget.languageCode,
                 botDifficulties: vsComputer
                     ? {for (var i = 1; i < playerCount; i++) i: difficulty}
@@ -426,6 +465,61 @@ class _GameSetupScreenState extends State<GameSetupScreen> {
                     style: TextStyle(fontFamily: t.font, color: Colors.white60),
                   ),
                 ),
+              Text(
+                t.choose('Match duration (offline)', 'খেলার সময়সীমা (অফলাইন)'),
+                style: TextStyle(
+                  color: kBoardGold,
+                  fontFamily: t.font,
+                  fontSize: 18,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  for (final mode in <(int?, String)>[
+                    (
+                      null,
+                      t.choose('Classic — unlimited', 'ক্লাসিক — সীমাহীন'),
+                    ),
+                    (
+                      GameConfig.quickMatchMaximumTurns,
+                      t.choose('Quick', 'দ্রুত'),
+                    ),
+                    (
+                      GameConfig.standardMatchMaximumTurns,
+                      t.choose('Standard', 'সাধারণ'),
+                    ),
+                    (
+                      GameConfig.extendedMatchMaximumTurns,
+                      t.choose('Extended', 'দীর্ঘ'),
+                    ),
+                  ])
+                    ChoiceChip(
+                      label: Text(
+                        mode.$1 == null
+                            ? mode.$2
+                            : '${mode.$2} · ${t.integer(mode.$1!)}',
+                      ),
+                      selected: maximumTurns == mode.$1,
+                      onSelected: (_) => setState(() => maximumTurns = mode.$1),
+                    ),
+                  ActionChip(
+                    label: Text(t.choose('Custom', 'নির্ধারিত')),
+                    onPressed: _chooseCustomLimit,
+                  ),
+                ],
+              ),
+              if (maximumTurns != null)
+                Text(
+                  t.choose(
+                    'Maximum ${t.integer(maximumTurns!)} completed turns. Highest net worth wins; ties use cash, then seat order.',
+                    'সর্বোচ্চ ${t.integer(maximumTurns!)} চাল সম্পন্ন হলে সর্বোচ্চ নিট সম্পদের খেলোয়াড় জিতবেন; সমান হলে নগদ, পরে আসনক্রম বিবেচিত হবে.',
+                  ),
+                  style: const TextStyle(color: Colors.white70),
+                ),
+              const SizedBox(height: 12),
               if (_resume != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),

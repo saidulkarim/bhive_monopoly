@@ -5,13 +5,23 @@ import 'package:monopoly/core/fonts/font_preferences.dart';
 import 'package:monopoly/game/ui/game_text.dart';
 
 void main() {
-  test('KarnaphuliMJ default uses Nikosh fallback when needed', () {
-    expect(FontCatalog.defaultFor('bn'), 'KarnaphuliMJ');
+  test('Noto Sans Bengali default uses Nikosh fallback when needed', () {
+    expect(FontCatalog.defaultFor('bn'), 'NotoSansBengali');
     expect(FontCatalog.fallbacks('bn', 'KarnaphuliMJ'), <String>[
+      'NotoSansBengali',
       'Nikosh',
       'NikoshBAN',
     ]);
     expect(FontCatalog.fallbacks('bn', 'Hadi'), <String>[
+      'NotoSansBengali',
+      'Nikosh',
+      'NikoshBAN',
+    ]);
+    expect(
+      FontCatalog.renderFamily('bn', 'NotoSansBengali'),
+      'NotoSansBengali',
+    );
+    expect(FontCatalog.renderFallbacks('bn', 'NotoSansBengali'), <String>[
       'Nikosh',
       'NikoshBAN',
     ]);

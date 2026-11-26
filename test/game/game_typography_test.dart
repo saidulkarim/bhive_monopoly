@@ -8,8 +8,8 @@ void main() {
   test('Bangla font, fallback, numerals, and all board labels', () {
     const bn = GameText('bn');
     const en = GameText('en');
-    expect(bn.font, 'Nikosh');
-    expect(bn.fallbackFonts, <String>['NikoshBAN']);
+    expect(bn.font, 'NotoSansBengali');
+    expect(bn.fallbackFonts, <String>['Nikosh', 'NikoshBAN']);
     expect(en.font, 'Exo2');
     expect(bn.integer(1500), '১৫০০');
     expect(bn.money(1500), '৳১,৫০০');
@@ -56,8 +56,9 @@ void main() {
 
     await pumpLanguage('bn');
     var ctx = tester.element(find.text('Sample'));
-    expect(Theme.of(ctx).textTheme.bodyMedium!.fontFamily, 'Nikosh');
+    expect(Theme.of(ctx).textTheme.bodyMedium!.fontFamily, 'NotoSansBengali');
     expect(Theme.of(ctx).textTheme.bodyMedium!.fontFamilyFallback, <String>[
+      'Nikosh',
       'NikoshBAN',
     ]);
 

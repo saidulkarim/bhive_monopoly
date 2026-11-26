@@ -10,16 +10,16 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test(
-    'KarnaphuliMJ remains the default preference, with legible Unicode rendering',
+    'Noto Sans Bengali is the default preference, with legible Unicode rendering',
     () {
-      expect(FontCatalog.defaultBangla, 'KarnaphuliMJ');
+      expect(FontCatalog.defaultBangla, 'NotoSansBengali');
       expect(
         FontCatalog.renderFamily('bn', FontCatalog.defaultBangla),
-        'Nikosh',
+        'NotoSansBengali',
       );
       expect(
         FontCatalog.renderFallbacks('bn', FontCatalog.defaultBangla),
-        <String>['NikoshBAN'],
+        <String>['Nikosh', 'NikoshBAN'],
       );
       expect(FontCatalog.renderFamily('bn', 'Hadi'), 'Hadi');
       expect(FontCatalog.renderFamily('en', 'Exo2'), 'Exo2');
@@ -30,6 +30,8 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final preferences = FontPreferences();
     await preferences.load();
+    expect(preferences.banglaFamily, 'NotoSansBengali');
+    await preferences.save(banglaFamily: 'KarnaphuliMJ', englishFamily: 'Exo2');
     expect(preferences.banglaFamily, 'KarnaphuliMJ');
     expect(preferences.renderFamilyFor('bn'), 'Nikosh');
     final reloaded = FontPreferences();
@@ -42,6 +44,8 @@ void main() {
   testWidgets(
     'Bangla theme and nested game pages use one Unicode-safe family',
     (tester) async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      await FontPreferences.instance.load();
       await tester.pumpWidget(
         MaterialApp(
           builder: (context, child) => FontAppBuilder(
@@ -56,7 +60,10 @@ void main() {
       );
       await tester.pump();
       final context = tester.element(find.text('বাংলা · ভাষা · ডলার · টাকা'));
-      expect(Theme.of(context).textTheme.bodyMedium!.fontFamily, 'Nikosh');
+      expect(
+        Theme.of(context).textTheme.bodyMedium!.fontFamily,
+        'NotoSansBengali',
+      );
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },

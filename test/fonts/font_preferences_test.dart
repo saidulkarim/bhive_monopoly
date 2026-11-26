@@ -9,13 +9,23 @@ import 'package:monopoly/core/fonts/font_app_builder.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('KarnaphuliMJ default and supported Unicode fallbacks', () {
-    expect(FontCatalog.defaultFor('bn'), 'KarnaphuliMJ');
+  test('Noto Sans Bengali default and supported Unicode fallbacks', () {
+    expect(FontCatalog.defaultFor('bn'), 'NotoSansBengali');
     expect(FontCatalog.fallbacks('bn', 'KarnaphuliMJ'), <String>[
+      'NotoSansBengali',
       'Nikosh',
       'NikoshBAN',
     ]);
     expect(FontCatalog.fallbacks('bn', 'Hadi'), <String>[
+      'NotoSansBengali',
+      'Nikosh',
+      'NikoshBAN',
+    ]);
+    expect(
+      FontCatalog.renderFamily('bn', 'NotoSansBengali'),
+      'NotoSansBengali',
+    );
+    expect(FontCatalog.renderFallbacks('bn', 'NotoSansBengali'), <String>[
       'Nikosh',
       'NikoshBAN',
     ]);
@@ -27,12 +37,16 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final first = FontPreferences();
     await first.load();
-    expect(first.banglaFamily, 'KarnaphuliMJ');
+    expect(first.banglaFamily, 'NotoSansBengali');
     expect(first.englishFamily, 'Exo2');
 
     await first.save(banglaFamily: 'Hadi', englishFamily: 'Roboto');
     expect(first.banglaFamily, 'Hadi');
-    expect(first.fallbacksFor('bn'), <String>['Nikosh', 'NikoshBAN']);
+    expect(first.fallbacksFor('bn'), <String>[
+      'NotoSansBengali',
+      'Nikosh',
+      'NikoshBAN',
+    ]);
 
     final second = FontPreferences();
     await second.load();
@@ -40,25 +54,25 @@ void main() {
     expect(second.englishFamily, 'Roboto');
 
     await second.restoreDefaults();
-    expect(second.banglaFamily, 'KarnaphuliMJ');
+    expect(second.banglaFamily, 'NotoSansBengali');
     expect(second.englishFamily, 'Exo2');
     first.dispose();
     second.dispose();
   });
 
-  test('Invalid old selection reverts to KarnaphuliMJ default', () async {
+  test('Invalid old selection reverts to Noto Sans Bengali default', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{
       'bhive_font_bangla_v1': 'MissingBanglaFont',
       'bhive_font_english_v1': 'MissingEnglishFont',
     });
     final prefs = FontPreferences();
     await prefs.load();
-    expect(prefs.banglaFamily, 'KarnaphuliMJ');
+    expect(prefs.banglaFamily, 'NotoSansBengali');
     expect(prefs.englishFamily, 'Exo2');
     prefs.dispose();
   });
 
-  test('Old Karnaphuli alias migrates to KarnaphuliMJ', () async {
+  test('Old Karnaphuli alias migrates to Noto Sans Bengali', () async {
     SharedPreferences.setMockInitialValues(<String, Object>{
       'bhive_font_bangla_v1': 'Karnaphuli',
       'bhive_font_english_v1': 'Exo2',
@@ -66,41 +80,42 @@ void main() {
     });
     final prefs = FontPreferences();
     await prefs.load();
-    expect(prefs.banglaFamily, 'KarnaphuliMJ');
+    expect(prefs.banglaFamily, 'NotoSansBengali');
     final stored = await SharedPreferences.getInstance();
-    expect(stored.getString('bhive_font_bangla_v1'), 'KarnaphuliMJ');
-    expect(stored.getBool('bhive_font_default_karnaphuli_mj_v3'), isTrue);
+    expect(stored.getString('bhive_font_bangla_v1'), 'NotoSansBengali');
+    expect(stored.getBool('bhive_font_default_noto_bengali_v4'), isTrue);
+    prefs.dispose();
+  });
+
+  test('Explicit Nikosh selection is preserved after Noto migration', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'bhive_font_bangla_v1': 'Nikosh',
+      'bhive_font_default_noto_bengali_v4': true,
+      'bhive_font_english_v1': 'Exo2',
+    });
+    final prefs = FontPreferences();
+    await prefs.load();
+    expect(prefs.banglaFamily, 'Nikosh');
     prefs.dispose();
   });
 
   test(
-    'Explicit Nikosh selection is preserved without prior migration',
+    'Previous automatic Nikosh migration migrates to Noto Sans Bengali',
     () async {
       SharedPreferences.setMockInitialValues(<String, Object>{
         'bhive_font_bangla_v1': 'Nikosh',
         'bhive_font_english_v1': 'Exo2',
+        'bhive_font_unicode_nikosh_v2': true,
       });
       final prefs = FontPreferences();
       await prefs.load();
-      expect(prefs.banglaFamily, 'Nikosh');
+      expect(prefs.banglaFamily, 'NotoSansBengali');
+      final stored = await SharedPreferences.getInstance();
+      expect(stored.getString('bhive_font_bangla_v1'), 'NotoSansBengali');
+      expect(stored.getBool('bhive_font_default_noto_bengali_v4'), isTrue);
       prefs.dispose();
     },
   );
-
-  test('Previous automatic Nikosh migration restores KarnaphuliMJ', () async {
-    SharedPreferences.setMockInitialValues(<String, Object>{
-      'bhive_font_bangla_v1': 'Nikosh',
-      'bhive_font_english_v1': 'Exo2',
-      'bhive_font_unicode_nikosh_v2': true,
-    });
-    final prefs = FontPreferences();
-    await prefs.load();
-    expect(prefs.banglaFamily, 'KarnaphuliMJ');
-    final stored = await SharedPreferences.getInstance();
-    expect(stored.getString('bhive_font_bangla_v1'), 'KarnaphuliMJ');
-    expect(stored.getBool('bhive_font_default_karnaphuli_mj_v3'), isTrue);
-    prefs.dispose();
-  });
 
   testWidgets('App font builder keeps MJ selection with Unicode-safe text', (
     tester,
@@ -108,6 +123,7 @@ void main() {
     // Singleton is loaded only once in this isolate.
     SharedPreferences.setMockInitialValues(<String, Object>{
       'bhive_font_bangla_v1': 'KarnaphuliMJ',
+      'bhive_font_default_noto_bengali_v4': true,
       'bhive_font_english_v1': 'Exo2',
     });
     await FontPreferences.instance.load();
@@ -121,6 +137,7 @@ void main() {
     final ctx = tester.element(find.text('বাংলা অ আ ক খ'));
     expect(Theme.of(ctx).textTheme.bodyMedium!.fontFamily, 'Nikosh');
     expect(Theme.of(ctx).textTheme.bodyMedium!.fontFamilyFallback, <String>[
+      'NotoSansBengali',
       'NikoshBAN',
     ]);
     await tester.pumpWidget(const SizedBox.shrink());

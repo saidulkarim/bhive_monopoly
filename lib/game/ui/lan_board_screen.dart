@@ -19,6 +19,8 @@ import 'game_text.dart';
 import 'experience_settings_screen.dart';
 import 'token_settings_screen.dart';
 import 'widgets/victory_confetti.dart';
+import 'widgets/turn_assist.dart';
+import '../progression/match_progress.dart';
 import 'widgets/lan_avatar_badge.dart';
 import 'widgets/game_board_view.dart';
 import 'widgets/adaptive_board_panel.dart';
@@ -60,6 +62,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
   int _seenError = 0;
   Future<void>? _completedHistoryWrite;
   bool _historyQueued = false;
+  final MatchProgress _progress = MatchProgress();
   final ValueNotifier<int> _boardUpdates = ValueNotifier<int>(0);
   bool _boardActionPending = false;
   Timer? _boardActionCooldown;
@@ -320,6 +323,23 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
   LanRoomController get room => widget.room;
   GameEngine? get game => room.game;
 
+  void _observeProgress(GameEngine engine) {
+    if (!_progress.observe(engine)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || engine.phase == TurnPhase.gameOver) return;
+      AppNotices.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            t.choose(
+              'Strategic deadlock detected. Consider trading properties or building houses.',
+              'খেলায় কৌশলগত স্থবিরতা দেখা দিয়েছে। সম্পত্তি বিনিময় বা বাড়ি নির্মাণের কথা বিবেচনা করুন।',
+            ),
+          ),
+        ),
+      );
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -336,6 +356,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
     room.addListener(_update);
     _checkConnectivity();
     _saveLanResultIfFinished(engine);
+    if (engine != null) _observeProgress(engine);
     _scheduleDecisionPrompt();
   }
 
@@ -369,6 +390,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
     final engine = game;
     _saveLanResultIfFinished(engine);
     if (engine != null) {
+      _observeProgress(engine);
       final event = room.lastEvent;
       if (event != null && event.sequence > _lastSequence) {
         _lastSequence = event.sequence;
@@ -668,140 +690,159 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
       ),
       // The center of the board is the only roll/end-turn control.
       bottomNavigationBar: null,
-      body: Stack(
-        children: [
-          SafeArea(
-            child: engine == null
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const CircularProgressIndicator(color: kBoardGold),
-                        const SizedBox(height: 12),
-                        Text(
-                          t.choose(
-                            'Syncing the board with host…',
-                            'হোস্টের সাথে বোর্ড সিঙ্ক হচ্ছে…',
-                          ),
-                          style: TextStyle(
-                            fontFamily: t.font,
-                            color: Colors.white70,
-                          ),
-                        ),
-                        if (!room.connected) ...[
+      body: TurnAssist(
+        turnKey:
+            (_canUseBoardActions &&
+                !_propertyModalOpen &&
+                !_tradeDialogOpen &&
+                !_decisionOpen &&
+                game?.phase == TurnPhase.complete)
+            ? '${game?.turnNumber}:${game?.currentPlayerId}'
+            : null,
+        eligible: () =>
+            _canUseBoardActions &&
+            !_propertyModalOpen &&
+            !_tradeDialogOpen &&
+            !_decisionOpen &&
+            game?.phase == TurnPhase.complete,
+        text: t,
+        child: Stack(
+          children: [
+            SafeArea(
+              child: engine == null
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const CircularProgressIndicator(color: kBoardGold),
                           const SizedBox(height: 12),
-                          FilledButton(
-                            onPressed: () => unawaited(_tryReconnect()),
-                            child: Text(
-                              t.choose('Reconnect', 'পুনরায় যুক্ত হন'),
+                          Text(
+                            t.choose(
+                              'Syncing the board with host…',
+                              'হোস্টের সাথে বোর্ড সিঙ্ক হচ্ছে…',
+                            ),
+                            style: TextStyle(
+                              fontFamily: t.font,
+                              color: Colors.white70,
                             ),
                           ),
-                        ],
-                      ],
-                    ),
-                  )
-                : LayoutBuilder(
-                    builder: (ctx, size) {
-                      final wide = usesWideGameBoardLayout(size.biggest);
-                      final board = AdaptiveBoardPanel(
-                        game: engine,
-                        text: t,
-                        onSelect: _showTile,
-                        visiblePositions: _positions,
-                        dicePreview: _dicePreview,
-                        diceRolling: _diceRolling,
-                        canAct: _canUseBoardActions,
-                        actionEnabled: () => _canUseBoardActions,
-                        onReviewDecision: _openDecisionSheet,
-                        decisionEnabled: () =>
-                            _needsDecision && _canMakeDecision,
-                        onRoll: _handleBoardDice,
-                        onEndTurn: _handleBoardEndTurn,
-                        boardUpdates: _boardUpdates,
-                        gameProvider: () => room.game,
-                        diceValueProvider: () => _dicePreview,
-                        isRollingProvider: () => _diceRolling,
-                        onViewActivity: () => GameActivitySheet.show(
-                          context,
-                          text: t,
-                          events: List<String>.of(room.game?.log ?? engine.log),
-                          players: (room.game ?? engine).players,
-                          structuredEvents:
-                              (room.game ?? engine).activityEvents,
-                        ),
-                      );
-                      if (wide) {
-                        return Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Row(
-                            children: [
-                              Expanded(child: board),
-                              const SizedBox(width: 16),
-                              SizedBox(
-                                width: 350,
-                                child: ListView(
-                                  children: [
-                                    _roomBanner(),
-                                    const SizedBox(height: 12),
-                                    _players(),
-                                    const SizedBox(height: 12),
-                                    _controls(),
-                                    const SizedBox(height: 12),
-                                    _events(),
-                                  ],
-                                ),
+                          if (!room.connected) ...[
+                            const SizedBox(height: 12),
+                            FilledButton(
+                              onPressed: () => unawaited(_tryReconnect()),
+                              child: Text(
+                                t.choose('Reconnect', 'পুনরায় যুক্ত হন'),
                               ),
-                            ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    )
+                  : LayoutBuilder(
+                      builder: (ctx, size) {
+                        final wide = usesWideGameBoardLayout(size.biggest);
+                        final board = AdaptiveBoardPanel(
+                          game: engine,
+                          text: t,
+                          onSelect: _showTile,
+                          visiblePositions: _positions,
+                          dicePreview: _dicePreview,
+                          diceRolling: _diceRolling,
+                          canAct: _canUseBoardActions,
+                          actionEnabled: () => _canUseBoardActions,
+                          onReviewDecision: _openDecisionSheet,
+                          decisionEnabled: () =>
+                              _needsDecision && _canMakeDecision,
+                          onRoll: _handleBoardDice,
+                          onEndTurn: _handleBoardEndTurn,
+                          boardUpdates: _boardUpdates,
+                          gameProvider: () => room.game,
+                          diceValueProvider: () => _dicePreview,
+                          isRollingProvider: () => _diceRolling,
+                          onViewActivity: () => GameActivitySheet.show(
+                            context,
+                            text: t,
+                            events: List<String>.of(
+                              room.game?.log ?? engine.log,
+                            ),
+                            players: (room.game ?? engine).players,
+                            structuredEvents:
+                                (room.game ?? engine).activityEvents,
                           ),
                         );
-                      }
-                      final needsDecision = _needsDecision;
-                      return ListView(
-                        padding: const EdgeInsets.all(12),
-                        children: [
-                          _roomBanner(),
-                          const SizedBox(height: 10),
-                          CompactPlayersStrip(game: engine, text: t),
-                          if (room.pendingTrade != null ||
-                              engine.phase == TurnPhase.gameOver) ...<Widget>[
+                        if (wide) {
+                          return Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Row(
+                              children: [
+                                Expanded(child: board),
+                                const SizedBox(width: 16),
+                                SizedBox(
+                                  width: 350,
+                                  child: ListView(
+                                    children: [
+                                      _roomBanner(),
+                                      const SizedBox(height: 12),
+                                      _players(),
+                                      const SizedBox(height: 12),
+                                      _controls(),
+                                      const SizedBox(height: 12),
+                                      _events(),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                        final needsDecision = _needsDecision;
+                        return ListView(
+                          padding: const EdgeInsets.all(12),
+                          children: [
+                            _roomBanner(),
                             const SizedBox(height: 10),
-                            _controls(),
-                          ] else if (needsDecision) ...<Widget>[
+                            CompactPlayersStrip(game: engine, text: t),
+                            if (room.pendingTrade != null ||
+                                engine.phase == TurnPhase.gameOver) ...<Widget>[
+                              const SizedBox(height: 10),
+                              _controls(),
+                            ] else if (needsDecision) ...<Widget>[
+                              const SizedBox(height: 10),
+                              _decisionNotice(),
+                            ],
                             const SizedBox(height: 10),
-                            _decisionNotice(),
-                          ],
-                          const SizedBox(height: 10),
-                          SizedBox(
-                            height: min(size.maxWidth - 24, 680.0) + 76,
-                            child: board,
-                          ),
+                            SizedBox(
+                              height: min(size.maxWidth - 24, 680.0) + 76,
+                              child: board,
+                            ),
 
-                          if (engine.phase == TurnPhase.roll ||
-                              engine.phase == TurnPhase.complete) ...<Widget>[
-                            const SizedBox(height: 8),
-                            _secondary(
-                              t.choose('OFFER TRADE', 'বিনিময়ের প্রস্তাব'),
-                              _canUseBoardActions ? _openTradeDialog : null,
-                            ),
-                            const SizedBox(height: 6),
-                            _secondary(
-                              t.choose(
-                                'MANAGE PROPERTIES',
-                                'সম্পত্তি পরিচালনা',
+                            if (engine.phase == TurnPhase.roll ||
+                                engine.phase == TurnPhase.complete) ...<Widget>[
+                              const SizedBox(height: 8),
+                              _secondary(
+                                t.choose('OFFER TRADE', 'বিনিময়ের প্রস্তাব'),
+                                _canUseBoardActions ? _openTradeDialog : null,
                               ),
-                              _canUseBoardActions ? _showMyProperties : null,
-                            ),
+                              const SizedBox(height: 6),
+                              _secondary(
+                                t.choose(
+                                  'MANAGE PROPERTIES',
+                                  'সম্পত্তি পরিচালনা',
+                                ),
+                                _canUseBoardActions ? _showMyProperties : null,
+                              ),
+                            ],
+                            const SizedBox(height: 12),
+                            _events(),
                           ],
-                          const SizedBox(height: 12),
-                          _events(),
-                        ],
-                      );
-                    },
-                  ),
-          ),
-          if (engine?.phase == TurnPhase.gameOver)
-            const Positioned.fill(child: VictoryConfetti()),
-        ],
+                        );
+                      },
+                    ),
+            ),
+            if (engine?.phase == TurnPhase.gameOver)
+              const Positioned.fill(child: VictoryConfetti()),
+          ],
+        ),
       ),
     );
   }
@@ -1199,7 +1240,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
             ),
           ],
           if (engine.phase == TurnPhase.gameOver) ...[
-            const Icon(Icons.emoji_events, color: kBoardGold, size: 60),
+            const PremiumVictoryTrophy(),
             Text(
               '${engine.players[engine.winnerId!].name} '
               '${t.choose('WINS!', 'বিজয়ী!')}',
