@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/graphics_resource_policy.dart';
 
 const playerAvatarIcons = <IconData>[
   Icons.directions_car_rounded,
@@ -45,8 +46,12 @@ class PlayerAvatar extends StatelessWidget {
       ),
       child: bytes == null
           ? icon
-          : Image.memory(
-              bytes!,
+          : Image(
+              image: GraphicsResourcePolicy.smallImage(
+                context,
+                MemoryImage(bytes!),
+                size,
+              ),
               fit: BoxFit.cover,
               gaplessPlayback: true,
               errorBuilder: (_, __, ___) => icon,

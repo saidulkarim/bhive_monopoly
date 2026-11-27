@@ -104,6 +104,7 @@ class _TokenSettingsScreenState extends State<TokenSettingsScreen> {
               final experience = GameExperienceSettings.instance;
               final autoRotate =
                   !experience.effectiveReducedMotion &&
+                  VisualActivityScope.allowsIdleDecorationOf(context) &&
                   !(MediaQuery.maybeOf(context)?.disableAnimations ?? false) &&
                   (!GameConfig.advancedBatteryOptimizationEnabled ||
                       !GameConfig.tokenAutoRotationPerformanceOnly ||

@@ -34,6 +34,8 @@ import 'widgets/property_buy_request.dart';
 import 'widgets/animated_deed_entrance.dart';
 import 'widgets/victory_standings_sheet.dart';
 import 'widgets/game_activity_sheet.dart';
+import 'widgets/ai_operation_watchdog.dart';
+import '../validation/game_snapshot_validator.dart';
 
 /// Offline local game with Pass & Play or computer opponents.
 /// Mobile/tablet/web layout is adaptive.
@@ -70,6 +72,11 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
   int _lastBotTradeTurn = -100000;
   final Map<(int, int), int> _lastBuyRequest = {};
   Timer? _botTimer;
+  late final AiOperationWatchdog _aiWatchdog;
+  bool _aiPaused = false;
+  bool _commandRunning = false;
+  int _aiRecoveryAttempts = 0;
+
   final Map<int, int> _visiblePositions = <int, int>{};
   DiceRoll? _dicePreview;
   bool _diceRolling = false;
@@ -108,6 +115,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
       // only asks for a human decision; bidding is never automatic.
       if (!mounted ||
           _busy ||
+          _aiPaused ||
           _decisionOpen ||
           _propertyModalOpen ||
           !_needsDecision ||
@@ -131,7 +139,9 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
   }
 
   void _openDecisionSheet() {
-    if (_decisionOpen || !_needsDecision || _actingBotId != null) return;
+    if (_aiPaused || _decisionOpen || !_needsDecision || _actingBotId != null) {
+      return;
+    }
     _autoDecisionKey = _decisionKey;
     _decisionOpen = true;
     showModalBottomSheet<void>(
@@ -278,6 +288,16 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
   @override
   void initState() {
     super.initState();
+    _aiWatchdog = AiOperationWatchdog(
+      timeout: const Duration(seconds: GameConfig.aiWatchdogTimeoutSeconds),
+      onTimeout: () {
+        if (!mounted) return;
+        _pauseAi(
+          StateError('AI operation deadline exceeded'),
+          StackTrace.current,
+        );
+      },
+    );
     _matchId =
         widget.matchId ??
         '${DateTime.now().toUtc().microsecondsSinceEpoch}-${_random.nextInt(1 << 30)}';
@@ -306,6 +326,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
   @override
   void dispose() {
     _botTimer?.cancel();
+    _aiWatchdog.dispose();
     _boardUpdates.dispose();
     _decisionRevision.dispose();
     bidController.dispose();
@@ -313,6 +334,8 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
   }
 
   bool _run(void Function() action, {bool scheduleBot = true}) {
+    if (!mounted || _commandRunning || _aiPaused) return false;
+    _commandRunning = true;
     _botTimer?.cancel();
     try {
       final previousPhase = game.phase;
@@ -361,6 +384,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
       _scheduleDecisionPrompt();
       return true;
     } on GameRuleException catch (error) {
+      if (_aiWatchdog.running) rethrow;
       if (!mounted) return false;
       AppNotices.of(context).hideCurrentSnackBar();
       AppNotices.of(context).showSnackBar(
@@ -371,6 +395,13 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
         ),
       );
       return false;
+    } catch (error, stack) {
+      if (_aiWatchdog.running) rethrow;
+      GameDiagnostics.record('Offline command', error, stack);
+      if (mounted) _pauseAi(error, stack, record: false);
+      return false;
+    } finally {
+      _commandRunning = false;
     }
   }
 
@@ -453,34 +484,111 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
     return _isBot(id) ? id : null;
   }
 
+  void _pauseAi(Object error, StackTrace stack, {bool record = true}) {
+    if (!mounted) return;
+    _botTimer?.cancel();
+    if (record) {
+      GameDiagnostics.record(
+        'Offline recovery turn ${game.turnNumber} ${game.phase.name}',
+        error,
+        stack,
+      );
+    }
+    setState(() => _aiPaused = true);
+    _updateBoard();
+    final decision = _decisionContext;
+    if (decision != null && decision.mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted &&
+            _aiPaused &&
+            decision.mounted &&
+            ModalRoute.of(decision)?.isCurrent == true) {
+          Navigator.of(decision).pop();
+        }
+      });
+    }
+  }
+
+  void _continueAfterRecovery() {
+    if (!mounted ||
+        !_aiPaused ||
+        _aiWatchdog.running ||
+        _busy ||
+        _aiRecoveryAttempts >= GameConfig.aiMaximumRecoveryAttempts) {
+      return;
+    }
+    try {
+      // Validate both the public snapshot and private import invariants.
+      final snapshot = game.exportSave();
+      GameSnapshotValidator.validateOffline(snapshot);
+      GameEngine.importSave(snapshot);
+    } catch (error, stack) {
+      _pauseAi(error, stack);
+      setState(
+        () => _aiRecoveryAttempts = GameConfig.aiMaximumRecoveryAttempts,
+      );
+      return;
+    }
+    setState(() {
+      _aiRecoveryAttempts++;
+      _aiPaused = false;
+      _autoDecisionKey = null;
+    });
+    _updateBoard();
+    _queueBot();
+    _scheduleDecisionPrompt();
+  }
+
   void _queueBot() {
     _botTimer?.cancel();
-    if (!mounted || _busy || _actingBotId == null) return;
+    if (!mounted ||
+        _busy ||
+        _aiPaused ||
+        _aiWatchdog.running ||
+        _actingBotId == null) {
+      return;
+    }
     _botTimer = Timer(
       const Duration(milliseconds: GameConfig.aiActionDelayMilliseconds),
       () {
-        try {
-          _runBot();
-        } catch (error, stack) {
-          GameDiagnostics.record('AI turn', error, stack);
-          if (mounted) {
-            AppNotices.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  t.choose(
-                    'Computer turn interrupted. Return to the last saved match if needed.',
-                    'কম্পিউটারের চাল বাধাগ্রস্ত হয়েছে। প্রয়োজনে সর্বশেষ সংরক্ষিত খেলায় ফিরে যান।',
-                  ),
-                ),
-              ),
-            );
-          }
-        }
+        unawaited(_executeBot());
       },
     );
   }
 
-  void _runBot() {
+  Future<void> _executeBot() async {
+    if (!mounted ||
+        _busy ||
+        _aiPaused ||
+        _actingBotId == null ||
+        !_aiWatchdog.begin(monitor: GameConfig.aiWatchdogEnabled)) {
+      return;
+    }
+    try {
+      await _runBot();
+      if (!_aiWatchdog.timedOut && !_aiPaused) _aiRecoveryAttempts = 0;
+    } catch (error, stack) {
+      if (mounted) _pauseAi(error, stack);
+    } finally {
+      _aiWatchdog.finish();
+      if (mounted) {
+        if (_aiPaused) {
+          // The operation has settled. No concurrent or late retry is allowed.
+          setState(() {});
+          _updateBoard();
+        } else {
+          if (_actingBotId == null) {
+            setState(() {});
+            _updateBoard();
+          }
+          _queueBot();
+          _scheduleDecisionPrompt();
+        }
+      }
+    }
+  }
+
+  Future<void> _runBot() async {
     if (!mounted || _busy) return;
     final id = _actingBotId;
     if (id == null) return;
@@ -505,7 +613,12 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
         );
         if (humanOffer != null) {
           _lastBotTradeTurn = game.turnNumber;
-          unawaited(_askHumanTrade(humanOffer));
+          _aiWatchdog.suspendDeadline();
+          try {
+            await _askHumanTrade(humanOffer);
+          } finally {
+            if (GameConfig.aiWatchdogEnabled) _aiWatchdog.resumeDeadline();
+          }
           return;
         }
       }
@@ -515,11 +628,11 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
       playerId: id,
       difficulty: widget.botDifficulties[id]!,
     );
-    if (decision == null) return;
+    if (decision == null) throw StateError('No AI decision for eligible turn');
     switch (decision.action) {
       case BotAction.roll:
       case BotAction.jailRoll:
-        _animateRoll(jailAttempt: decision.action == BotAction.jailRoll);
+        await _animateRoll(jailAttempt: decision.action == BotAction.jailRoll);
         return;
       case BotAction.payFine:
         _run(game.payJailFine);
@@ -603,6 +716,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
       }
       _run(() => game.acceptTrade(offer), scheduleBot: false);
     } catch (error, stack) {
+      if (_aiWatchdog.running) rethrow;
       GameDiagnostics.record('AI trade proposal', error, stack);
       if (mounted) {
         AppNotices.of(context).showSnackBar(
@@ -626,79 +740,97 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
   }
 
   Future<void> _animateRoll({bool jailAttempt = false}) async {
-    if (_busy || !mounted) return;
+    if (_aiPaused || _busy || !mounted) return;
     _botTimer?.cancel();
-    final movingId = game.currentPlayerId;
-    final startPosition = game.currentPlayer.position;
-    final finalFirst = _random.nextInt(6) + 1;
-    final finalSecond = _random.nextInt(6) + 1;
-    final reduceMotion =
-        GameExperienceSettings.instance.effectiveReducedMotion ||
-        MediaQuery.of(context).disableAnimations;
-    GameAudio.instance.fire(GameSfx.dice);
-    setState(() {
-      _busy = true;
-      _diceRolling = !reduceMotion;
-    });
-    _updateBoard();
-    // Dice frames are only visual; the final pair is sent once to GameEngine.
-    for (final delay
-        in reduceMotion ? const <int>[] : GameplayMotion.diceFrames) {
-      if (!mounted) return;
-      setState(
-        () => _dicePreview = DiceRoll(
-          _random.nextInt(6) + 1,
-          _random.nextInt(6) + 1,
-        ),
-      );
+    try {
+      final movingId = game.currentPlayerId;
+      final startPosition = game.currentPlayer.position;
+      final finalFirst = _random.nextInt(6) + 1;
+      final finalSecond = _random.nextInt(6) + 1;
+      final reduceMotion =
+          GameExperienceSettings.instance.effectiveReducedMotion ||
+          MediaQuery.of(context).disableAnimations;
+      GameAudio.instance.fire(GameSfx.dice);
+      setState(() {
+        _busy = true;
+        _diceRolling = !reduceMotion;
+      });
       _updateBoard();
-      await Future<void>.delayed(Duration(milliseconds: delay));
-    }
-    if (!mounted) return;
-    setState(() {
-      _dicePreview = DiceRoll(finalFirst, finalSecond);
-      _diceRolling = false;
-    });
-    _updateBoard();
-    final applied = _run(() {
-      if (jailAttempt) {
-        game.tryJailRoll(finalFirst, finalSecond);
-      } else {
-        game.roll(finalFirst, finalSecond);
+      // Dice frames are only visual; the final pair is sent once to GameEngine.
+      for (final delay
+          in reduceMotion ? const <int>[] : GameplayMotion.diceFrames) {
+        if (!mounted || _aiPaused) return;
+        setState(
+          () => _dicePreview = DiceRoll(
+            _random.nextInt(6) + 1,
+            _random.nextInt(6) + 1,
+          ),
+        );
+        _updateBoard();
+        await Future<void>.delayed(Duration(milliseconds: delay));
       }
-    }, scheduleBot: false);
-    if (applied) {
-      final finishPosition = game.players[movingId].position;
-      final path = GameplayMotion.dicePath(
-        startPosition,
-        finishPosition,
-        finalFirst + finalSecond,
-      );
-      if (!reduceMotion) {
-        for (final position in path) {
-          if (!mounted) return;
-          setState(() => _visiblePositions[movingId] = position);
-          _updateBoard();
-          await Future<void>.delayed(GameplayMotion.stepInterval);
+      if (!mounted || _aiPaused) return;
+      setState(() {
+        _dicePreview = DiceRoll(finalFirst, finalSecond);
+        _diceRolling = false;
+      });
+      _updateBoard();
+      final applied = _run(() {
+        if (jailAttempt) {
+          game.tryJailRoll(finalFirst, finalSecond);
+        } else {
+          game.roll(finalFirst, finalSecond);
         }
+      }, scheduleBot: false);
+      if (applied) {
+        final finishPosition = game.players[movingId].position;
+        final path = GameplayMotion.dicePath(
+          startPosition,
+          finishPosition,
+          finalFirst + finalSecond,
+        );
+        if (!reduceMotion) {
+          for (final position in path) {
+            if (!mounted || _aiPaused) return;
+            setState(() => _visiblePositions[movingId] = position);
+            _updateBoard();
+            await Future<void>.delayed(GameplayMotion.stepInterval);
+          }
+        }
+        if (!mounted || _aiPaused) return;
+        setState(() => _visiblePositions[movingId] = finishPosition);
       }
-      if (!mounted) return;
-      setState(() => _visiblePositions[movingId] = finishPosition);
+      if (!mounted || _aiPaused) return;
+      setState(() {
+        _dicePreview = null;
+        _busy = false;
+      });
+      _updateBoard();
+      _scheduleDecisionPrompt();
+      _queueBot();
+    } catch (error, stack) {
+      if (_aiWatchdog.running) rethrow;
+      if (mounted) _pauseAi(error, stack);
+    } finally {
+      if (mounted && _busy) {
+        setState(() {
+          _busy = false;
+          _diceRolling = false;
+          _dicePreview = null;
+          for (final player in game.players) {
+            _visiblePositions[player.id] = player.position;
+          }
+        });
+        _updateBoard();
+      }
     }
-    if (!mounted) return;
-    setState(() {
-      _dicePreview = null;
-      _busy = false;
-    });
-    _updateBoard();
-    _scheduleDecisionPrompt();
-    _queueBot();
   }
 
   void _roll() => _animateRoll();
   void _tryJail() => _animateRoll(jailAttempt: true);
 
-  bool get _canHumanAct => !_busy && _actingBotId == null;
+  bool get _canHumanAct =>
+      !_aiPaused && !_busy && !_aiWatchdog.running && _actingBotId == null;
 
   void _handleBoardDice() {
     if (!_canHumanAct) return;
@@ -729,7 +861,9 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
         actions: [
           IconButton(
             tooltip: t.choose('Save game', 'খেলা সংরক্ষণ'),
-            onPressed: _busy ? null : () => _persist(showMessage: true),
+            onPressed: _busy || _aiPaused
+                ? null
+                : () => _persist(showMessage: true),
             icon: const Icon(Icons.save_outlined),
           ),
           PopupMenuButton<BoardCameraPreset>(
@@ -820,159 +954,231 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
       ),
       // Primary roll/end-turn actions now live only on the board itself.
       bottomNavigationBar: null,
-      body: TurnAssist(
-        turnKey:
-            (_canHumanAct &&
-                !_propertyModalOpen &&
-                !_decisionOpen &&
-                game.phase == TurnPhase.complete)
-            ? '${game.turnNumber}:${game.currentPlayerId}'
-            : null,
-        eligible: () =>
-            _canHumanAct &&
-            !_propertyModalOpen &&
-            !_decisionOpen &&
-            game.phase == TurnPhase.complete,
-        text: t,
-        onAutoEnd: _handleBoardEndTurn,
-        child: Stack(
-          children: [
-            SafeArea(
-              child: LayoutBuilder(
-                builder: (context, c) {
-                  final wide = usesWideGameBoardLayout(c.biggest);
-                  if (wide) {
-                    return Padding(
-                      padding: const EdgeInsets.all(15),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: AdaptiveBoardPanel(
-                              game: game,
-                              text: t,
-                              onSelect: (index) {
-                                if (!_busy && _actingBotId == null) {
-                                  _showTile(index);
-                                }
-                              },
-                              visiblePositions: _visiblePositions,
-                              dicePreview: _dicePreview,
-                              diceRolling: _diceRolling,
-                              onRoll: _handleBoardDice,
-                              onEndTurn: _handleBoardEndTurn,
-                              canAct: _canHumanAct,
-                              actionEnabled: () => _canHumanAct,
-                              onReviewDecision: _openDecisionSheet,
-                              decisionEnabled: () =>
-                                  _needsDecision && _canHumanAct,
-                              boardUpdates: _boardUpdates,
-                              diceValueProvider: () => _dicePreview,
-                              isRollingProvider: () => _diceRolling,
-                              onViewActivity: () => GameActivitySheet.show(
-                                context,
-                                text: t,
-                                events: List<String>.of(game.log),
-                                players: game.players,
-                                structuredEvents: game.activityEvents,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          SizedBox(
-                            width: 350,
-                            child: ListView(
+      body: _aiPaused
+          ? _recoveryPanel()
+          : TurnAssist(
+              turnKey:
+                  (_canHumanAct &&
+                      !_propertyModalOpen &&
+                      !_decisionOpen &&
+                      game.phase == TurnPhase.complete)
+                  ? '${game.turnNumber}:${game.currentPlayerId}'
+                  : null,
+              eligible: () =>
+                  _canHumanAct &&
+                  !_propertyModalOpen &&
+                  !_decisionOpen &&
+                  game.phase == TurnPhase.complete,
+              text: t,
+              onAutoEnd: _handleBoardEndTurn,
+              child: Stack(
+                children: [
+                  SafeArea(
+                    child: LayoutBuilder(
+                      builder: (context, c) {
+                        final wide = usesWideGameBoardLayout(c.biggest);
+                        if (wide) {
+                          return Padding(
+                            padding: const EdgeInsets.all(15),
+                            child: Row(
                               children: [
-                                _playerCards(),
-                                const SizedBox(height: 14),
-                                _turnPanel(),
-                                const SizedBox(height: 14),
-                                _eventsPanel(),
+                                Expanded(
+                                  child: AdaptiveBoardPanel(
+                                    game: game,
+                                    text: t,
+                                    onSelect: (index) {
+                                      if (!_busy && _actingBotId == null) {
+                                        _showTile(index);
+                                      }
+                                    },
+                                    visiblePositions: _visiblePositions,
+                                    dicePreview: _dicePreview,
+                                    diceRolling: _diceRolling,
+                                    onRoll: _handleBoardDice,
+                                    onEndTurn: _handleBoardEndTurn,
+                                    canAct: _canHumanAct,
+                                    actionEnabled: () => _canHumanAct,
+                                    onReviewDecision: _openDecisionSheet,
+                                    decisionEnabled: () =>
+                                        _needsDecision && _canHumanAct,
+                                    boardUpdates: _boardUpdates,
+                                    diceValueProvider: () => _dicePreview,
+                                    isRollingProvider: () => _diceRolling,
+                                    onViewActivity: () =>
+                                        GameActivitySheet.show(
+                                          context,
+                                          text: t,
+                                          events: List<String>.of(game.log),
+                                          players: game.players,
+                                          structuredEvents: game.activityEvents,
+                                        ),
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                SizedBox(
+                                  width: 350,
+                                  child: ListView(
+                                    children: [
+                                      _playerCards(),
+                                      const SizedBox(height: 14),
+                                      _turnPanel(),
+                                      const SizedBox(height: 14),
+                                      _eventsPanel(),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-                  final boardSide = min(c.maxWidth - 24, 680.0);
-                  final needsDecision = _needsDecision;
-                  return ListView(
-                    padding: const EdgeInsets.all(12),
-                    children: [
-                      CompactPlayersStrip(game: game, text: t),
-                      if (needsDecision) ...[
-                        const SizedBox(height: 10),
-                        _decisionNotice(),
-                      ],
-                      if (game.phase == TurnPhase.gameOver) ...<Widget>[
-                        const SizedBox(height: 10),
-                        _turnPanel(),
-                      ],
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        height: boardSide + 76,
-                        child: AdaptiveBoardPanel(
-                          game: game,
-                          text: t,
-                          onSelect: (index) {
-                            if (!_busy && _actingBotId == null) {
-                              _showTile(index);
-                            }
-                          },
-                          visiblePositions: _visiblePositions,
-                          dicePreview: _dicePreview,
-                          diceRolling: _diceRolling,
-                          onRoll: _handleBoardDice,
-                          onEndTurn: _handleBoardEndTurn,
-                          canAct: _canHumanAct,
-                          actionEnabled: () => _canHumanAct,
-                          onReviewDecision: _openDecisionSheet,
-                          decisionEnabled: () => _needsDecision && _canHumanAct,
-                          boardUpdates: _boardUpdates,
-                          diceValueProvider: () => _dicePreview,
-                          isRollingProvider: () => _diceRolling,
-                          onViewActivity: () => GameActivitySheet.show(
-                            context,
-                            text: t,
-                            events: List<String>.of(game.log),
-                            players: game.players,
-                            structuredEvents: game.activityEvents,
-                          ),
-                        ),
-                      ),
-
-                      if (game.phase == TurnPhase.roll ||
-                          game.phase == TurnPhase.complete) ...<Widget>[
-                        const SizedBox(height: 8),
-                        OutlinedButton.icon(
-                          onPressed: _busy || _actingBotId != null
-                              ? null
-                              : _showMyProperties,
-                          icon: const Icon(Icons.real_estate_agent_outlined),
-                          label: Text(
-                            t.choose('MY PROPERTIES', 'আমার সম্পত্তি'),
-                            style: TextStyle(
-                              fontFamily: t.font,
-                              fontFamilyFallback: t.fallbackFonts,
+                          );
+                        }
+                        final boardSide = min(c.maxWidth - 24, 680.0);
+                        final needsDecision = _needsDecision;
+                        return ListView(
+                          padding: const EdgeInsets.all(12),
+                          children: [
+                            CompactPlayersStrip(game: game, text: t),
+                            if (needsDecision) ...[
+                              const SizedBox(height: 10),
+                              _decisionNotice(),
+                            ],
+                            if (game.phase == TurnPhase.gameOver) ...<Widget>[
+                              const SizedBox(height: 10),
+                              _turnPanel(),
+                            ],
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              height: boardSide + 76,
+                              child: AdaptiveBoardPanel(
+                                game: game,
+                                text: t,
+                                onSelect: (index) {
+                                  if (!_busy && _actingBotId == null) {
+                                    _showTile(index);
+                                  }
+                                },
+                                visiblePositions: _visiblePositions,
+                                dicePreview: _dicePreview,
+                                diceRolling: _diceRolling,
+                                onRoll: _handleBoardDice,
+                                onEndTurn: _handleBoardEndTurn,
+                                canAct: _canHumanAct,
+                                actionEnabled: () => _canHumanAct,
+                                onReviewDecision: _openDecisionSheet,
+                                decisionEnabled: () =>
+                                    _needsDecision && _canHumanAct,
+                                boardUpdates: _boardUpdates,
+                                diceValueProvider: () => _dicePreview,
+                                isRollingProvider: () => _diceRolling,
+                                onViewActivity: () => GameActivitySheet.show(
+                                  context,
+                                  text: t,
+                                  events: List<String>.of(game.log),
+                                  players: game.players,
+                                  structuredEvents: game.activityEvents,
+                                ),
+                              ),
                             ),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: kBoardGold,
-                            minimumSize: const Size.fromHeight(47),
-                            side: const BorderSide(color: kBoardGold),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      _eventsPanel(),
-                    ],
-                  );
-                },
+
+                            if (game.phase == TurnPhase.roll ||
+                                game.phase == TurnPhase.complete) ...<Widget>[
+                              const SizedBox(height: 8),
+                              OutlinedButton.icon(
+                                onPressed: _busy || _actingBotId != null
+                                    ? null
+                                    : _showMyProperties,
+                                icon: const Icon(
+                                  Icons.real_estate_agent_outlined,
+                                ),
+                                label: Text(
+                                  t.choose('MY PROPERTIES', 'আমার সম্পত্তি'),
+                                  style: TextStyle(
+                                    fontFamily: t.font,
+                                    fontFamilyFallback: t.fallbackFonts,
+                                  ),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: kBoardGold,
+                                  minimumSize: const Size.fromHeight(47),
+                                  side: const BorderSide(color: kBoardGold),
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 12),
+                            _eventsPanel(),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                  if (game.phase == TurnPhase.gameOver)
+                    const Positioned.fill(child: VictoryConfetti()),
+                ],
               ),
             ),
-            if (game.phase == TurnPhase.gameOver)
-              const Positioned.fill(child: VictoryConfetti()),
-          ],
+    );
+  }
+
+  Widget _recoveryPanel() {
+    final waiting = _aiWatchdog.running || _busy;
+    final canContinue =
+        !waiting && _aiRecoveryAttempts < GameConfig.aiMaximumRecoveryAttempts;
+    return SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.health_and_safety_outlined,
+                  color: kBoardGold,
+                  size: 52,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  t.choose('Game recovery', 'খেলা পুনরুদ্ধার'),
+                  style: TextStyle(
+                    fontFamily: t.font,
+                    color: kBoardGold,
+                    fontSize: 24,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  t.choose(
+                    waiting
+                        ? 'The current operation must finish before continuing.'
+                        : 'The game is paused. Check the current state before continuing, or leave without saving over the existing checkpoint.',
+                    waiting
+                        ? 'চলমান কাজ শেষ না হওয়া পর্যন্ত অপেক্ষা করুন।'
+                        : 'খেলা স্থগিত আছে। বর্তমান অবস্থা যাচাই করে চালিয়ে যান, অথবা আগের সংরক্ষিত খেলা না বদলে বেরিয়ে যান।',
+                  ),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontFamily: t.font, color: Colors.white70),
+                ),
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: canContinue ? _continueAfterRecovery : null,
+                  child: Text(
+                    t.choose('CHECK & CONTINUE', 'যাচাই করে চালিয়ে যান'),
+                  ),
+                ),
+                TextButton(
+                  onPressed: waiting
+                      ? null
+                      : () => Navigator.of(context).maybePop(),
+                  child: Text(
+                    t.choose(
+                      'EXIT WITHOUT NEW SAVE',
+                      'নতুন করে সংরক্ষণ না করে বেরিয়ে যান',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -1473,7 +1679,13 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
   );
 
   Future<void> _showMyProperties() async {
-    if (!mounted || _busy || _actingBotId != null || _propertyModalOpen) return;
+    if (!mounted ||
+        _aiPaused ||
+        _busy ||
+        _actingBotId != null ||
+        _propertyModalOpen) {
+      return;
+    }
     _propertyModalOpen = true;
     int? selected;
     try {
@@ -1546,7 +1758,13 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
   }
 
   Future<void> _showTile(int index) async {
-    if (!mounted || _busy || _actingBotId != null || _propertyModalOpen) return;
+    if (!mounted ||
+        _aiPaused ||
+        _busy ||
+        _actingBotId != null ||
+        _propertyModalOpen) {
+      return;
+    }
     _propertyModalOpen = true;
     final seller = game.currentPlayerId;
     final turn = game.turnNumber;
@@ -1708,6 +1926,7 @@ class _GameBoardScreenState extends State<GameBoardScreen> {
     }
     bool current() =>
         mounted &&
+        !_aiPaused &&
         !_busy &&
         _actingBotId == null &&
         game.turnNumber == turn &&

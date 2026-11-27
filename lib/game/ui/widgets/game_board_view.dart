@@ -55,6 +55,32 @@ const List<Color> tokenColors = <Color>[
   Color(0xFFF6E47B),
 ];
 
+/// Presentation-only grouping. Each invocation reads current mutable player
+/// state and intermediate movement positions; never reuse across game updates.
+Map<int, List<PlayerState>> groupBoardOccupants(
+  Iterable<PlayerState> players,
+  Map<int, int> visiblePositions,
+  int currentPlayerId,
+) {
+  final result = <int, List<PlayerState>>{};
+  for (final player in players) {
+    if (player.bankrupt) continue;
+    final index = visiblePositions[player.id] ?? player.position;
+    (result[index] ??= <PlayerState>[]).add(player);
+  }
+  for (final occupants in result.values) {
+    occupants.sort((a, b) => _occupantOrder(a, b, currentPlayerId));
+  }
+  return result;
+}
+
+int _occupantOrder(PlayerState a, PlayerState b, int currentPlayerId) {
+  if (a.id == b.id) return 0;
+  if (a.id == currentPlayerId) return -1;
+  if (b.id == currentPlayerId) return 1;
+  return a.id.compareTo(b.id);
+}
+
 /// 1000 × 1000 logical playing surface. FittedBox scales it consistently on
 /// Android phones, tablets, and web browser widths. Pinch to inspect tiles.
 class GameBoardView extends StatelessWidget {
@@ -120,6 +146,13 @@ class GameBoardView extends StatelessWidget {
               ? (cameraOverride ?? settings.cameraPreset)
               : BoardCameraPreset.topDown;
           final side = math.min(constraints.maxWidth, constraints.maxHeight);
+          final occupantsByTile = GameConfig.groupedBoardOccupantsEnabled
+              ? groupBoardOccupants(
+                  engine.players,
+                  visiblePositions,
+                  engine.currentPlayerId,
+                )
+              : null;
           return Center(
             child: SizedBox(
               width: side,
@@ -169,18 +202,17 @@ class GameBoardView extends StatelessWidget {
                         width: 1000,
                         child: Stack(
                           children: [
-                            Positioned.fill(
+                            const Positioned.fill(
                               child: DecoratedBox(
                                 decoration: BoxDecoration(
-                                  gradient: const RadialGradient(
+                                  gradient: RadialGradient(
                                     colors: [
                                       Color(0xFF1F6559),
                                       Color(0xFF0C2528),
                                     ],
                                   ),
-                                  border: Border.all(
-                                    color: kBoardGold,
-                                    width: 6,
+                                  border: Border.fromBorderSide(
+                                    BorderSide(color: kBoardGold, width: 6),
                                   ),
                                 ),
                               ),
@@ -221,7 +253,7 @@ class GameBoardView extends StatelessWidget {
                               ),
                             ),
                             for (final tileData in engine.spaces)
-                              _positionTile(tileData),
+                              _positionTile(tileData, occupantsByTile),
                             // Painted on the inward-facing edge of each
                             // owned property, not over the price/name.
                             for (final tileData in engine.spaces)
@@ -275,28 +307,27 @@ class GameBoardView extends StatelessWidget {
     );
   }
 
-  Widget _positionTile(BoardSpace data) {
+  Widget _positionTile(
+    BoardSpace data,
+    Map<int, List<PlayerState>>? occupantsByTile,
+  ) {
     final (row, col) = gridPosition(data.index);
     final state = engine.properties[data.index];
     final group = data.group;
     // All non-bankrupt players are tracked, including human and AI/LAN
     // opponents. Use the *visible* step so the glow follows movement.
-    final occupants = [
-      for (final player in engine.players)
-        if (!player.bankrupt &&
-            (visiblePositions[player.id] ?? player.position) == data.index)
-          player,
-    ];
+    final occupants = occupantsByTile != null
+        ? (occupantsByTile[data.index] ?? const <PlayerState>[])
+        : ([
+            for (final player in engine.players)
+              if (!player.bankrupt &&
+                  (visiblePositions[player.id] ?? player.position) ==
+                      data.index)
+                player,
+          ]..sort((a, b) => _occupantOrder(a, b, engine.currentPlayerId)));
     final isCurrentPosition = occupants.any(
       (player) => player.id == engine.currentPlayerId,
     );
-    // When several tokens occupy a square, put the current player's colour
-    // first and paint equal-length colour segments around the perimeter.
-    occupants.sort((a, b) {
-      if (a.id == engine.currentPlayerId) return -1;
-      if (b.id == engine.currentPlayerId) return 1;
-      return a.id.compareTo(b.id);
-    });
     return Positioned(
       top: row * tile,
       left: col * tile,

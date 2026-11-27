@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../experience/game_audio.dart';
 import '../experience/game_experience_settings.dart';
+import '../experience/performance_diagnostics.dart';
+import '../../core/config/game_config.dart';
 import '../experience/board_camera_preset.dart';
 import 'game_text.dart';
 import 'widgets/game_board_view.dart';
@@ -50,6 +52,94 @@ class _ExperienceSettingsScreenState extends State<ExperienceSettingsScreen> {
         );
       }
     }
+  }
+
+  Widget _diagnosticsCard() {
+    final diagnostics = PerformanceDiagnostics.instance;
+    return AnimatedBuilder(
+      animation: diagnostics,
+      builder: (context, _) => Card(
+        color: const Color(0xFF1D3436),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                t.choose('Performance Diagnostics', 'পারফরম্যান্স নির্ণয়'),
+                style: const TextStyle(
+                  color: kBoardGold,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                t.choose(
+                  'Optional ${GameConfig.performanceDiagnosticsSessionSeconds}s frame sample. Start, return to gameplay, then reopen this screen to view results. Not a battery meter.',
+                  'ঐচ্ছিক ${GameConfig.performanceDiagnosticsSessionSeconds} সেকেন্ডের ফ্রেম নমুনা। শুরু করে খেলায় ফিরুন, পরে ফলাফল দেখতে এখানে আসুন। এটি ব্যাটারি মিটার নয়।',
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text('${t.choose('Frames', 'ফ্রেম')}: ${diagnostics.frames}'),
+              Text(
+                '${t.choose('Average total span (ms)', 'গড় মোট সময় (মি.সে.)')}: ${diagnostics.averageMilliseconds.toStringAsFixed(2)}',
+              ),
+              Text(
+                '${t.choose('Over budget', 'সময়সীমা অতিক্রম')}: ${diagnostics.overBudget}',
+              ),
+              Text(
+                '${t.choose('Worst span (ms)', 'সর্বোচ্চ সময় (মি.সে.)')}: ${(diagnostics.worstMicros / 1000).toStringAsFixed(2)}',
+              ),
+              const SizedBox(height: 8),
+              Text(
+                t.choose(
+                  'Flutter image cache (snapshot, not GPU memory)',
+                  'ফ্লাটার ছবির ক্যাশ (বর্তমান তথ্য, জিপিইউ মেমরি নয়)',
+                ),
+              ),
+              Text(
+                '${t.choose('Cached images', 'ক্যাশে থাকা ছবি')}: '
+                '${PaintingBinding.instance.imageCache.currentSize}',
+              ),
+              Text(
+                '${t.choose('Cached MiB', 'ক্যাশ মি.বি.')}: '
+                '${(PaintingBinding.instance.imageCache.currentSizeBytes / 1048576).toStringAsFixed(2)}',
+              ),
+              Text(
+                '${t.choose('Live images', 'সক্রিয় ছবি')}: '
+                '${PaintingBinding.instance.imageCache.liveImageCount}',
+              ),
+              Text(
+                '${t.choose('Pending images', 'অপেক্ষমাণ ছবি')}: '
+                '${PaintingBinding.instance.imageCache.pendingImageCount}',
+              ),
+              OutlinedButton(
+                onPressed: () => setState(() {}),
+                child: Text(
+                  t.choose(
+                    'Refresh cache snapshot',
+                    'ক্যাশের তথ্য হালনাগাদ করুন',
+                  ),
+                ),
+              ),
+              Wrap(
+                spacing: 8,
+                children: [
+                  OutlinedButton(
+                    onPressed: diagnostics.active ? null : diagnostics.start,
+                    child: Text(t.choose('Start sample', 'নমুনা শুরু')),
+                  ),
+                  OutlinedButton(
+                    onPressed: diagnostics.active ? diagnostics.stop : null,
+                    child: Text(t.choose('Stop & view', 'বন্ধ করে দেখুন')),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -376,7 +466,8 @@ class _ExperienceSettingsScreenState extends State<ExperienceSettingsScreen> {
                                   for (final profile in GamePowerProfile.values)
                                     ChoiceChip(
                                       selected:
-                                          settings.powerProfile == profile,
+                                          settings.selectedPowerProfile ==
+                                          profile,
                                       label: Text(
                                         switch (profile) {
                                           GamePowerProfile.performance =>
@@ -420,6 +511,14 @@ class _ExperienceSettingsScreenState extends State<ExperienceSettingsScreen> {
                               ),
                               const SizedBox(height: 8),
                               Text(
+                                '${t.choose('Effective profile', 'কার্যকর মোড')}: ${switch (settings.powerProfile) {
+                                  GamePowerProfile.performance => t.choose('Performance', 'উচ্চ পারফরম্যান্স'),
+                                  GamePowerProfile.balanced => t.choose('Balanced', 'ভারসাম্যপূর্ণ'),
+                                  GamePowerProfile.batterySaver => t.choose('Battery Saver', 'ব্যাটারি সাশ্রয়'),
+                                  GamePowerProfile.ultraSaver => t.choose('Ultra Saver', 'সর্বোচ্চ সাশ্রয়'),
+                                }}',
+                              ),
+                              Text(
                                 switch (settings.powerProfile) {
                                   GamePowerProfile.performance => t.choose(
                                     'Full gameplay motion with longer location highlights.',
@@ -448,6 +547,59 @@ class _ExperienceSettingsScreenState extends State<ExperienceSettingsScreen> {
                           ),
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      Card(
+                        color: const Color(0xFF1D3436),
+                        child: Column(
+                          children: [
+                            SwitchListTile.adaptive(
+                              title: Text(
+                                t.choose(
+                                  'Automatic Battery Saver',
+                                  'স্বয়ংক্রিয় ব্যাটারি সাশ্রয়',
+                                ),
+                              ),
+                              subtitle: Text(
+                                t.choose(
+                                  'Uses a lower power profile at low battery on Android. Web keeps your selected profile.',
+                                  'অ্যান্ড্রয়েডে ব্যাটারি কম হলে সাশ্রয়ী মোড চালু হয়। ওয়েবে নির্বাচিত মোড বজায় থাকে।',
+                                ),
+                              ),
+                              value: settings.automaticPowerEnabled,
+                              onChanged: (value) => unawaited(
+                                _apply(
+                                  () =>
+                                      settings.setAutomaticPowerEnabled(value),
+                                ),
+                              ),
+                            ),
+                            if (settings.automaticPowerEnabled)
+                              ListTile(
+                                title: Text(
+                                  settings.batteryReading == null
+                                      ? t.choose(
+                                          'Battery reading unavailable or pending',
+                                          'ব্যাটারির তথ্য অনুপলব্ধ অথবা অপেক্ষমাণ',
+                                        )
+                                      : '${t.choose('Battery', 'ব্যাটারি')}: ${settings.batteryReading!.level}%',
+                                ),
+                                subtitle: Text(
+                                  settings.batteryReading?.charging == true
+                                      ? t.choose(
+                                          'Charging — selected profile',
+                                          'চার্জ হচ্ছে — নির্বাচিত মোড',
+                                        )
+                                      : t.choose(
+                                          'Effective profile shown above',
+                                          'উপরে কার্যকর মোড দেখানো হয়েছে',
+                                        ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      _diagnosticsCard(),
                       const SizedBox(height: 20),
                       OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(

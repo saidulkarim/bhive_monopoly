@@ -41,7 +41,7 @@ class OfflineGameStore {
 
   static Future<void> _tail = Future<void>.value();
 
-  static Future<void> _enqueue(Future<void> Function() operation) {
+  static Future<T> _enqueue<T>(Future<T> Function() operation) {
     final result = _tail.then((_) => operation());
     _tail = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
     return result;
@@ -116,26 +116,35 @@ class OfflineGameStore {
         // Do not rotate the backup or update savedAt for an unchanged game.
         return;
       }
-      if (oldMatch != null && _groupId(oldMatch.matchId) == incomingGroup) {
+      // Never overwrite a good checkpoint with a malformed live state.
+      if (GameConfig.validateIncomingOfflineCheckpoint) _parse(payload);
+      final sameMatch =
+          oldMatch != null && _groupId(oldMatch.matchId) == incomingGroup;
+      final active = prefs.getString(activeMatchKey);
+      final switchingMatch = oldMatch != null
+          ? !sameMatch
+          : active != incomingGroup;
+      if (sameMatch) {
         if (!await prefs.setString(backupKey, previous!)) {
           throw StateError('Unable to write recovery checkpoint.');
         }
         if (!await prefs.setString(backupMatchKey, incomingGroup)) {
           throw StateError('Unable to finalize recovery checkpoint.');
         }
-      } else if ((oldMatch != null &&
-              _groupId(oldMatch.matchId) != incomingGroup) ||
-          (oldMatch == null &&
-              prefs.getString(activeMatchKey) != incomingGroup)) {
-        // Starting a new match invalidates a previous match's recovery data.
-        await prefs.remove(backupKey);
-        await prefs.remove(backupMatchKey);
+      } else if (switchingMatch) {
+        // Disarm fallback BEFORE changing the primary: an interrupted match
+        // switch must not resurrect a different match's backup.
+        await _remove(prefs, activeMatchKey);
       }
       if (!await prefs.setString(storageKey, payload)) {
         throw StateError('Unable to save game on this device.');
       }
       if (!await prefs.setString(activeMatchKey, incomingGroup)) {
         throw StateError('Unable to finalize saved game.');
+      }
+      if (switchingMatch) {
+        await _remove(prefs, backupKey);
+        await _remove(prefs, backupMatchKey);
       }
     });
   }
@@ -153,30 +162,33 @@ class OfflineGameStore {
     }
   }
 
-  static Future<SavedOfflineMatch?> load() async {
-    await _tail;
+  static Future<SavedOfflineMatch?> load() => _enqueue(() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(storageKey);
-    if (raw == null) return null;
-    try {
-      return _parse(raw);
-    } catch (_) {
-      final backup = prefs.getString(backupKey);
-      final active = prefs.getString(activeMatchKey);
-      final backupMatch = prefs.getString(backupMatchKey);
-      if (backup != null && active != null && backupMatch == active) {
-        try {
-          final recovered = _parse(backup, recovered: true);
-          if (_groupId(recovered.matchId) == active) return recovered;
-        } catch (_) {
-          // Neither copy is usable: surface a clear error, not a new game.
-        }
+    final active = prefs.getString(activeMatchKey);
+    if (raw != null) {
+      try {
+        return _parse(raw);
+      } catch (_) {
+        // Try only the backup belonging to the active match below.
       }
-      throw const FormatException(
-        'The saved game is damaged and no valid backup was found.',
-      );
+    } else if (active == null) {
+      return null;
     }
-  }
+    final backup = prefs.getString(backupKey);
+    final backupMatch = prefs.getString(backupMatchKey);
+    if (backup != null && active != null && backupMatch == active) {
+      try {
+        final recovered = _parse(backup, recovered: true);
+        if (_groupId(recovered.matchId) == active) return recovered;
+      } catch (_) {
+        // Neither copy is usable: surface a clear error, not a new game.
+      }
+    }
+    throw const FormatException(
+      'The saved game is damaged and no valid backup was found.',
+    );
+  });
 
   /// Delete only the matching completed match; a new game can already have
   /// started while match-history persistence finishes asynchronously.
@@ -184,7 +196,12 @@ class OfflineGameStore {
       _enqueue(() async {
         final prefs = await SharedPreferences.getInstance();
         final raw = prefs.getString(storageKey);
-        if (raw == null) return;
+        if (raw == null) {
+          if (prefs.getString(activeMatchKey) == expectedMatchId) {
+            await _removeAll(prefs);
+          }
+          return;
+        }
         bool matches = false;
         try {
           matches = _parse(raw).matchId == expectedMatchId;
@@ -195,11 +212,18 @@ class OfflineGameStore {
         if (matches) await _removeAll(prefs);
       });
 
+  static Future<void> _remove(SharedPreferences prefs, String key) async {
+    if (prefs.containsKey(key) && !await prefs.remove(key)) {
+      throw StateError('Unable to remove saved game metadata.');
+    }
+  }
+
   static Future<void> _removeAll(SharedPreferences prefs) async {
-    await prefs.remove(storageKey);
-    await prefs.remove(backupKey);
-    await prefs.remove(activeMatchKey);
-    await prefs.remove(backupMatchKey);
+    // Disarm recovery first so an interrupted clear cannot restore a backup.
+    await _remove(prefs, activeMatchKey);
+    await _remove(prefs, backupMatchKey);
+    await _remove(prefs, backupKey);
+    await _remove(prefs, storageKey);
   }
 
   static Future<void> clear() => _enqueue(() async {

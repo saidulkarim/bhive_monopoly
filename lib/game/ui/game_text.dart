@@ -137,6 +137,25 @@ class GameText {
         "রুম উপলব্ধ নেই অথবা অন্য খেলোয়াড়ের পুনঃসংযোগের অপেক্ষায় আছে।",
     "Connection failed. Rejoin the room.":
         "সংযোগ ব্যর্থ হয়েছে। আবার রুমে যোগ দিন।",
+    "The room host disconnected. This room is closed.":
+        "হোস্টের সংযোগ বিচ্ছিন্ন হয়েছে। রুমটি বন্ধ হয়ে গেছে।",
+    "Room not found. Check the room code.":
+        "রুম পাওয়া যায়নি। রুম কোড যাচাই করুন।",
+    "Room full or host disconnected.":
+        "রুম পূর্ণ অথবা হোস্টের সংযোগ বিচ্ছিন্ন।",
+    "Relay room creation timed out.": "রিলে রুম তৈরির সময় শেষ হয়েছে।",
+    "Relay server disconnected.": "রিলে সার্ভারের সংযোগ বিচ্ছিন্ন হয়েছে।",
+    "Host synchronization timed out. Reconnect to continue.":
+        "হোস্টের তথ্য সমন্বয়ের সময় শেষ হয়েছে। খেলা চালাতে পুনঃসংযোগ করুন।",
+    "Incorrect room PIN or incompatible game version.":
+        "রুম পিন ভুল অথবা গেমের সংস্করণ সামঞ্জস্যপূর্ণ নয়।",
+    "Match in progress. Only disconnected players may rejoin.":
+        "খেলা চলছে। শুধু সংযোগ বিচ্ছিন্ন খেলোয়াড় আবার যোগ দিতে পারবেন।",
+    "This lobby is full.": "এই রুমে আর জায়গা নেই।",
+    "A player with this name already joined.":
+        "এই নামে একজন খেলোয়াড় ইতিমধ্যে যোগ দিয়েছেন।",
+    "Please enter a valid name (1–24 characters).":
+        "সঠিক নাম লিখুন (১–২৪ অক্ষর)।",
     "Host connection lost. Reconnect to continue.":
         "হোস্টের সংযোগ বিচ্ছিন্ন হয়েছে। খেলা চালাতে পুনঃসংযোগ করুন।",
     "Unknown network error.": "নেটওয়ার্কে অজানা সমস্যা হয়েছে।",

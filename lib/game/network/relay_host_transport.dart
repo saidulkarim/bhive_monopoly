@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../../core/config/game_config.dart';
 import 'lan_host_transport.dart';
 
 /// Browser-compatible transport for the existing authoritative Dart game host.
@@ -22,7 +23,9 @@ class RelayHostTransport implements LanHostTransport {
 
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
-  Completer<void>? _opened;
+  Completer<String?>? _opened;
+  bool _transportLost = false;
+  bool _ready = false;
   bool _closed = false;
   void Function(Object, String)? _onMessage;
   void Function(Object)? _onDisconnect;
@@ -40,7 +43,8 @@ class RelayHostTransport implements LanHostTransport {
     }
     _onMessage = onMessage;
     _onDisconnect = onDisconnect;
-    _opened = Completer<void>();
+    final opened = Completer<String?>();
+    _opened = opened;
     try {
       final channel = WebSocketChannel.connect(endpoint);
       _channel = channel;
@@ -50,7 +54,12 @@ class RelayHostTransport implements LanHostTransport {
         onError: (Object error) => _disconnected('$error'),
         cancelOnError: true,
       );
-      await channel.ready.timeout(const Duration(seconds: 8));
+      await channel.ready.timeout(
+        const Duration(seconds: GameConfig.multiplayerSocketOpenTimeoutSeconds),
+      );
+      if (_closed || _transportLost) {
+        throw StateError('Relay server disconnected.');
+      }
       channel.sink.add(
         jsonEncode(<String, dynamic>{
           'kind': 'create',
@@ -58,7 +67,15 @@ class RelayHostTransport implements LanHostTransport {
           'capacity': capacity,
         }),
       );
-      await _opened!.future.timeout(const Duration(seconds: 8));
+      final failure = await opened.future.timeout(
+        const Duration(seconds: GameConfig.multiplayerHandshakeTimeoutSeconds),
+        onTimeout: () => 'Relay room creation timed out.',
+      );
+      if (failure != null) throw StateError(failure);
+      if (_closed || _transportLost) {
+        throw StateError('Relay server disconnected.');
+      }
+      _ready = true;
     } catch (_) {
       await close();
       rethrow;
@@ -66,7 +83,7 @@ class RelayHostTransport implements LanHostTransport {
   }
 
   void _handle(dynamic data) {
-    if (_closed || data is! String) return;
+    if (_closed || _transportLost || data is! String) return;
     try {
       final wire = jsonDecode(data) as Map<String, dynamic>;
       switch (wire['kind']) {
@@ -75,7 +92,7 @@ class RelayHostTransport implements LanHostTransport {
             _disconnected('Room code mismatch.');
             return;
           }
-          if (_opened?.isCompleted == false) _opened!.complete();
+          if (_opened?.isCompleted == false) _opened!.complete(null);
           break;
         case 'peer_message':
           final peer = wire['peer'];
@@ -91,7 +108,7 @@ class RelayHostTransport implements LanHostTransport {
         case 'error':
           final message = wire['message']?.toString() ?? 'Relay error.';
           if (_opened?.isCompleted == false) {
-            _opened!.completeError(StateError(message));
+            _opened!.complete(message);
           }
           break;
       }
@@ -101,34 +118,53 @@ class RelayHostTransport implements LanHostTransport {
   }
 
   void _disconnected(String message) {
-    if (_closed) return;
+    if (_closed || _transportLost) return;
+    _transportLost = true;
     if (_opened?.isCompleted == false) {
-      _opened!.completeError(StateError(message));
-    } else {
-      onConnectionLost?.call();
+      _opened!.complete(message);
     }
+    if (_ready) onConnectionLost?.call();
   }
 
   @override
   void send(Object connection, String message) {
-    if (_closed || connection is! String || _channel == null) return;
-    _channel!.sink.add(
-      jsonEncode(<String, dynamic>{
-        'kind': 'to_peer',
-        'peer': connection,
-        'payload': message,
-      }),
-    );
+    if (_closed ||
+        _transportLost ||
+        connection is! String ||
+        _channel == null) {
+      return;
+    }
+    try {
+      _channel!.sink.add(
+        jsonEncode(<String, dynamic>{
+          'kind': 'to_peer',
+          'peer': connection,
+          'payload': message,
+        }),
+      );
+    } catch (_) {
+      _disconnected('Relay server disconnected.');
+    }
   }
 
   @override
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    if (_opened?.isCompleted == false) {
+      _opened!.complete('Relay transport closed.');
+    }
     await _subscription?.cancel();
     _subscription = null;
     try {
-      await _channel?.sink.close();
+      final channel = _channel;
+      if (channel != null) {
+        await channel.sink.close().timeout(
+          const Duration(
+            seconds: GameConfig.multiplayerSocketCloseTimeoutSeconds,
+          ),
+        );
+      }
     } catch (_) {}
     _channel = null;
   }

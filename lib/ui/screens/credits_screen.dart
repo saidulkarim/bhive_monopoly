@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/ui/graphics_resource_policy.dart';
 import '../../game/ui/game_text.dart';
 import '../../game/ui/game_typography.dart';
 
@@ -86,8 +87,12 @@ class _CreditsScreenState extends State<CreditsScreen> {
                 Center(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(24),
-                    child: Image.asset(
-                      'assets/icons/app_icon.png',
+                    child: Image(
+                      image: GraphicsResourcePolicy.smallImage(
+                        context,
+                        const AssetImage('assets/icons/app_icon.png'),
+                        96,
+                      ),
                       width: 96,
                       height: 96,
                       fit: BoxFit.contain,

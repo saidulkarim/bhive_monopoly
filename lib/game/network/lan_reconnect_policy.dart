@@ -1,18 +1,19 @@
-/// Presentation-layer reconnection pacing. The existing host-authoritative
-/// protocol and secure rejoin token are left unchanged.
+import '../../core/config/game_config.dart';
+
+/// A bounded, event-driven retry schedule; no timers or network I/O here.
 class LanReconnectPolicy {
   const LanReconnectPolicy._();
 
-  static const int maxAttempts = 5;
-  static const List<Duration> delays = <Duration>[
-    Duration(seconds: 1),
-    Duration(seconds: 2),
-    Duration(seconds: 4),
-    Duration(seconds: 8),
-    Duration(seconds: 12),
-  ];
+  static int get maxAttempts =>
+      GameConfig.multiplayerReconnectDelaysSeconds.length;
 
-  /// The parameter is the number of retries already attempted.
+  static final List<Duration> delays = List<Duration>.unmodifiable(
+    GameConfig.multiplayerReconnectDelaysSeconds.map(
+      (s) => Duration(seconds: s),
+    ),
+  );
+
+  /// Number of automatic attempts already started (not merely scheduled).
   static Duration? delayFor(int attempted) =>
       attempted < 0 || attempted >= maxAttempts ? null : delays[attempted];
 }

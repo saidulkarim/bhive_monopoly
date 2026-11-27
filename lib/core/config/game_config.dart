@@ -176,4 +176,118 @@ abstract final class GameConfig {
   /// Skip identical offline saves while retaining the previous distinct
   /// validated checkpoint and existing serialized write ordering.
   static const skipUnchangedOfflineCheckpoints = true;
+  // ==========================================================
+  // PHASE 15.9B - VISUAL IDLE & BOARD WORK REDUCTION
+  // ==========================================================
+  /// Suspend optional decorative pulses and automatic preview rotation
+  /// after inactivity. Never gates authoritative gameplay or network I/O.
+  static const smartVisualIdleEnabled = true;
+
+  /// Seconds after the last input before decorative visuals become static.
+  /// Foreground resume starts a fresh interval. No recurring polling.
+  static const idleAnimationSuspendSeconds = 15;
+
+  /// Minimum interval between timer resets during continuous pointer motion.
+  /// Discrete taps, scrolling and keyboard presses reset immediately.
+  static const visualIdleMotionSampleMilliseconds = 1000;
+
+  /// Group visible players by board tile once per board build rather than
+  /// scanning all players separately for every tile. No cross-frame cache.
+  static const groupedBoardOccupantsEnabled = true;
+  // ==========================================================
+  // PHASE 15.9C - COMMAND INTEGRITY & CHECKPOINT VALIDATION
+  // ==========================================================
+
+  /// Capture bounded in-memory undo state before synchronous engine commands.
+  /// Restore on exceptions, without changing normal gameplay or writing to disk.
+  /// Applies to local and authoritative engine callers, not remote projections.
+  static const transactionRollbackEnabled = true;
+
+  /// Validate a changed offline checkpoint before replacing the primary save.
+  /// Identical validated checkpoints still skip writes under Phase 15.9A.
+  static const validateIncomingOfflineCheckpoint = true;
+  // ==========================================================
+  // PHASE 15.9D - OFFLINE AI OPERATION RECOVERY
+  // ==========================================================
+
+  /// Monitor eligible automated operations with a single one-shot timer.
+  /// Never interrupts a synchronous engine command or starts a concurrent AI.
+  static const aiWatchdogEnabled = true;
+
+  /// Deadline for automated operations; human trade decisions are excluded.
+  static const aiWatchdogTimeoutSeconds = 30;
+
+  /// Maximum explicit continuation attempts after consecutive AI failures.
+  /// After this limit the player can leave without overwriting the checkpoint.
+  static const aiMaximumRecoveryAttempts = 2;
+  // ==========================================================
+  // PHASE 15.9E - MULTIPLAYER RECONNECTION & NETWORK EFFICIENCY
+  // ==========================================================
+
+  /// Automatically rejoin an authenticated, started guest match.
+  /// Never creates a new room or replays gameplay actions.
+  static const multiplayerAutoReconnectEnabled = true;
+
+  /// Delays for successive automatic attempts, in seconds.
+  /// The list length is the retry budget. Manual retry starts a new budget.
+  static const multiplayerReconnectDelaysSeconds = <int>[2, 4, 8, 16, 30];
+
+  /// Maximum wait for a WebSocket to open (not the Bluetooth native call).
+  static const multiplayerSocketOpenTimeoutSeconds = 8;
+
+  /// Maximum wait for welcome, room membership and, if started, a valid
+  /// host board snapshot after opening the transport.
+  static const multiplayerHandshakeTimeoutSeconds = 12;
+
+  /// Bound waiting for a WebSocket close handshake during transport cleanup.
+  /// Old connection epochs are invalidated before any replacement opens.
+  static const multiplayerSocketCloseTimeoutSeconds = 3;
+
+  /// Suspend automatic guest retries while the app is hidden or paused.
+  /// Does not suspend an active connection or authoritative game traffic.
+  static const multiplayerSuspendBackgroundRetries = true;
+  // PHASE 15.9F - ADAPTIVE POWER AND OPTIONAL FRAME DIAGNOSTICS
+  /// Opt-in battery monitoring, off by default for privacy and low overhead.
+  static const automaticBatterySaverDefault = false;
+
+  /// At or below this percentage prefer Battery Saver while unplugged.
+  static const batterySaverThresholdPercent = 30;
+
+  /// At or below this percentage prefer Ultra Saver while unplugged.
+  static const ultraSaverThresholdPercent = 15;
+
+  /// Foreground-only battery sample interval when automatic mode is enabled.
+  static const batterySampleIntervalSeconds = 120;
+
+  /// Maximum time allowed for one platform battery sample.
+  static const batterySampleTimeoutSeconds = 5;
+
+  /// Maximum foreground frame diagnostics session length.
+  static const performanceDiagnosticsSessionSeconds = 120;
+
+  /// Frame budget used for reporting, not a forced frame-rate cap.
+  static const performanceFrameBudgetMilliseconds = 16.67;
+  // ==========================================================
+  // PHASE 15.9H - GRAPHICS AND IMAGE RESOURCE OPTIMIZATION
+  // ==========================================================
+
+  /// Request display-sized image decodes, preserving source aspect ratio.
+  /// The platform decoder may ignore resize hints (e.g. some web renderers).
+  static const displaySizedImageDecodingEnabled = true;
+
+  /// Quantize image decode sizes to avoid many near-identical cache keys.
+  /// The bucket is measured in physical pixels, not logical pixels.
+  static const imageDecodeBucketPixels = 64;
+
+  /// Maximum requested side for small profile and branding images only.
+  /// Does not change source files, photo upload or board zoom resolution.
+  static const smallImageDecodeMaximumPixels = 512;
+
+  /// Keep crisp token and tile outlines but omit optional soft glow passes
+  /// in the Battery Saver and Ultra Saver profiles.
+  static const lowPowerSimplifiedBoardEffectsEnabled = true;
+
+  /// Reuse a single decoded base64 avatar per Home/Profile screen.
+  /// Only the preview bytes are reused; persisted and network data are unchanged.
+  static const reuseAvatarPreviewBytesEnabled = true;
 }

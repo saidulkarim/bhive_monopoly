@@ -135,6 +135,117 @@ class GameEngine {
     group,
   ).every((space) => properties[space.index].ownerId == ownerId);
 
+  /// Synchronous command boundary. No timers, disk writes or JSON encoding.
+  /// On an exception restore the same live objects before rethrowing so the
+  /// caller's existing error handling still sees the original failure.
+  void _atomicAction(void Function() action) {
+    if (!GameConfig.transactionRollbackEnabled) {
+      action();
+      return;
+    }
+    final playerUndo = [
+      for (final p in players)
+        (
+          player: p,
+          color: p.colorIndex,
+          balance: p.balance,
+          position: p.position,
+          jail: p.inJail,
+          failed: p.jailFailedRolls,
+          cards: List<bool>.of(p.jailCardOrigins),
+          bankrupt: p.bankrupt,
+        ),
+    ];
+    final propertyUndo = [
+      for (final p in properties)
+        (
+          property: p,
+          owner: p.ownerId,
+          development: p.development,
+          mortgaged: p.mortgaged,
+        ),
+    ];
+    final oldCurrent = currentPlayerId;
+    final oldTurn = turnNumber;
+    final oldPhase = phase;
+    final oldPurchase = pendingPurchaseIndex;
+    final oldAuction = auction;
+    final oldBidder = oldAuction?.bidderId;
+    final oldBid = oldAuction?.highBid;
+    final oldHighest = oldAuction?.highestBidderId;
+    final oldPassed = oldAuction == null
+        ? null
+        : Set<int>.of(oldAuction.passed);
+    final oldRoll = lastRoll;
+    final oldWinner = winnerId;
+    final oldCreditor = debtCreditorId;
+    final oldDebts = Map<int, int?>.of(_pendingDebts);
+    final oldResume = _resumeAfterDebt;
+    final oldExtra = _extraRoll;
+    final oldDoubles = _consecutiveDoubles;
+    final oldChance = List<int>.of(_chanceDeck);
+    final oldCommunity = List<int>.of(_communityDeck);
+    final oldLog = List<String>.of(log);
+    final oldActivity = List<ActivityEvent>.of(_activity);
+    try {
+      action();
+    } catch (_) {
+      for (final v in playerUndo) {
+        final p = v.player;
+        p.colorIndex = v.color;
+        p.balance = v.balance;
+        p.position = v.position;
+        p.inJail = v.jail;
+        p.jailFailedRolls = v.failed;
+        p.jailCardOrigins
+          ..clear()
+          ..addAll(v.cards);
+        p.bankrupt = v.bankrupt;
+      }
+      for (final v in propertyUndo) {
+        final p = v.property;
+        p.ownerId = v.owner;
+        p.development = v.development;
+        p.mortgaged = v.mortgaged;
+      }
+      currentPlayerId = oldCurrent;
+      turnNumber = oldTurn;
+      phase = oldPhase;
+      pendingPurchaseIndex = oldPurchase;
+      auction = oldAuction;
+      if (oldAuction != null) {
+        oldAuction.bidderId = oldBidder!;
+        oldAuction.highBid = oldBid!;
+        oldAuction.highestBidderId = oldHighest;
+        oldAuction.passed
+          ..clear()
+          ..addAll(oldPassed!);
+      }
+      lastRoll = oldRoll;
+      winnerId = oldWinner;
+      debtCreditorId = oldCreditor;
+      _pendingDebts
+        ..clear()
+        ..addAll(oldDebts);
+      _resumeAfterDebt = oldResume;
+      _extraRoll = oldExtra;
+      _consecutiveDoubles = oldDoubles;
+      _chanceDeck
+        ..clear()
+        ..addAll(oldChance);
+      _communityDeck
+        ..clear()
+        ..addAll(oldCommunity);
+      log
+        ..clear()
+        ..addAll(oldLog);
+      _activity
+        ..clear()
+        ..addAll(oldActivity);
+      rethrow;
+    }
+  }
+
   void _require(bool condition, String message) {
     if (!condition) throw GameRuleException(message);
   }
@@ -166,7 +277,10 @@ class GameEngine {
     if (_activity.length > 70) _activity.removeLast();
   }
 
-  void roll(int first, int second) {
+  void roll(int first, int second) =>
+      _atomicAction(() => _rollAction(first, second));
+
+  void _rollAction(int first, int second) {
     _requirePhase(TurnPhase.roll);
     _validateDice(first, second);
     final dice = DiceRoll(first, second);
@@ -316,7 +430,9 @@ class GameEngine {
     return (utilities == 2 ? 10 : 4) * diceSum;
   }
 
-  void buyProperty() {
+  void buyProperty() => _atomicAction(() => _buyPropertyAction());
+
+  void _buyPropertyAction() {
     _requirePhase(TurnPhase.purchase);
     final index = pendingPurchaseIndex!;
     final tile = spaces[index];
@@ -339,7 +455,9 @@ class GameEngine {
     _finishLanding();
   }
 
-  void declinePurchase() {
+  void declinePurchase() => _atomicAction(() => _declinePurchaseAction());
+
+  void _declinePurchaseAction() {
     _requirePhase(TurnPhase.purchase);
     auction = AuctionState(
       spaceIndex: pendingPurchaseIndex!,
@@ -355,7 +473,9 @@ class GameEngine {
   }
 
   /// Bidder must offer the minimum or more, and have enough available cash.
-  void bid(int amount) {
+  void bid(int amount) => _atomicAction(() => _bidAction(amount));
+
+  void _bidAction(int amount) {
     _requirePhase(TurnPhase.auction);
     final a = auction!;
     _require(amount >= a.minimumBid, 'Minimum bid: ${a.minimumBid}.');
@@ -375,7 +495,9 @@ class GameEngine {
     _advanceAuction(a.bidderId);
   }
 
-  void passBid() {
+  void passBid() => _atomicAction(() => _passBidAction());
+
+  void _passBidAction() {
     _requirePhase(TurnPhase.auction);
     final a = auction!;
     a.passed.add(a.bidderId);
@@ -435,7 +557,9 @@ class GameEngine {
   }
 
   /// Jail turns are strictly separated from regular doubles/extra-turn rules.
-  void payJailFine() {
+  void payJailFine() => _atomicAction(() => _payJailFineAction());
+
+  void _payJailFineAction() {
     _requirePhase(TurnPhase.jailDecision);
     _charge(currentPlayerId, 50);
     _releaseFromJail();
@@ -454,7 +578,9 @@ class GameEngine {
     );
   }
 
-  void useJailCard() {
+  void useJailCard() => _atomicAction(() => _useJailCardAction());
+
+  void _useJailCardAction() {
     _requirePhase(TurnPhase.jailDecision);
     _require(currentPlayer.getOutOfJailCards > 0, 'No jail release card.');
     final fromChance = currentPlayer.jailCardOrigins.removeLast();
@@ -473,7 +599,10 @@ class GameEngine {
     );
   }
 
-  void tryJailRoll(int first, int second) {
+  void tryJailRoll(int first, int second) =>
+      _atomicAction(() => _tryJailRollAction(first, second));
+
+  void _tryJailRollAction(int first, int second) {
     _requirePhase(TurnPhase.jailDecision);
     _validateDice(first, second);
     final dice = DiceRoll(first, second);
@@ -574,7 +703,9 @@ class GameEngine {
     }
   }
 
-  void endTurn() {
+  void endTurn() => _atomicAction(() => _endTurnAction());
+
+  void _endTurnAction() {
     _requirePhase(TurnPhase.complete);
     _endCurrentTurn();
   }
@@ -632,7 +763,9 @@ class GameEngine {
     );
   }
 
-  void build(int index) {
+  void build(int index) => _atomicAction(() => _buildAction(index));
+
+  void _buildAction(int index) {
     _requireOwner(index);
     _require(phase != TurnPhase.debt, 'Resolve your debt first.');
     final tile = spaces[index];
@@ -670,7 +803,10 @@ class GameEngine {
     );
   }
 
-  void sellBuilding(int index) {
+  void sellBuilding(int index) =>
+      _atomicAction(() => _sellBuildingAction(index));
+
+  void _sellBuildingAction(int index) {
     _requireOwner(index);
     final tile = spaces[index];
     final state = properties[index];
@@ -705,7 +841,9 @@ class GameEngine {
     _checkSolvency();
   }
 
-  void mortgage(int index) {
+  void mortgage(int index) => _atomicAction(() => _mortgageAction(index));
+
+  void _mortgageAction(int index) {
     _requireOwner(index);
     final tile = spaces[index];
     final state = properties[index];
@@ -734,7 +872,9 @@ class GameEngine {
 
   int unmortgageCost(int index) => ((spaces[index].price ~/ 2) * 11 + 9) ~/ 10;
 
-  void unmortgage(int index) {
+  void unmortgage(int index) => _atomicAction(() => _unmortgageAction(index));
+
+  void _unmortgageAction(int index) {
     _requireOwner(index);
     _require(phase != TurnPhase.debt, 'Resolve your debt first.');
     final state = properties[index];
@@ -802,7 +942,10 @@ class GameEngine {
   }
 
   /// Call only after the recipient has approved the validated offer.
-  void acceptTrade(TradeOffer offer) {
+  void acceptTrade(TradeOffer offer) =>
+      _atomicAction(() => _acceptTradeAction(offer));
+
+  void _acceptTradeAction(TradeOffer offer) {
     validateTrade(offer);
     final a = players[offer.fromPlayerId];
     final b = players[offer.toPlayerId];
@@ -845,7 +988,9 @@ class GameEngine {
     }
   }
 
-  void declareBankruptcy() {
+  void declareBankruptcy() => _atomicAction(() => _declareBankruptcyAction());
+
+  void _declareBankruptcyAction() {
     _requirePhase(TurnPhase.debt);
     final loser = currentPlayer;
     final creditor = debtCreditorId;

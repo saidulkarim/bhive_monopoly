@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -11,6 +9,7 @@ import '../../core/utils/avatar_encoder.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../../providers/app_controller.dart';
 import '../widgets/player_avatar.dart';
+import '../../core/utils/avatar_preview_bytes.dart';
 import '../../game/experience/player_palette.dart';
 import '../../game/ui/widgets/player_color_picker.dart';
 
@@ -27,6 +26,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   late final TextEditingController _name;
   late int _preset;
   String? _photo;
+  final _avatarPreview = AvatarPreviewBytes();
   bool _busy = false;
 
   @override
@@ -117,12 +117,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    Uint8List? bytes;
-    try {
-      if (_photo != null) bytes = base64Decode(_photo!);
-    } on FormatException {
-      bytes = null;
-    }
+    final bytes = _avatarPreview.resolve(_photo);
     return PopScope(
       canPop: !_busy,
       child: Scaffold(

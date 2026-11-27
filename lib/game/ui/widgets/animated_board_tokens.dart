@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../core/ui/visual_activity_scope.dart';
+import '../../../core/ui/graphics_resource_policy.dart';
 
 import '../../engine/game_engine.dart';
 import '../../experience/game_experience_settings.dart';
@@ -238,6 +239,7 @@ class _TokenLocationAuraState extends State<_TokenLocationAura>
         !widget.reducedMotion &&
         widget.pulseCycles > 0 &&
         VisualActivityScope.isForegroundOf(context) &&
+        VisualActivityScope.allowsIdleDecorationOf(context) &&
         TickerMode.of(context) &&
         ModalRoute.isCurrentOf(context) != false &&
         !(MediaQuery.maybeOf(context)?.disableAnimations ?? false);
@@ -277,6 +279,9 @@ class _TokenLocationAuraState extends State<_TokenLocationAura>
                   painter: _TokenAuraPainter(
                     color: widget.color,
                     active: widget.isCurrentTurn,
+                    softGlow: GraphicsResourcePolicy.useSoftGlow(
+                      widget.pulseCycles,
+                    ),
                     progress: _allowed != true || _pulse.value >= 1
                         ? .55
                         : (_pulse.value * widget.pulseCycles) % 1,
@@ -297,24 +302,28 @@ class _TokenAuraPainter extends CustomPainter {
     required this.color,
     required this.active,
     required this.progress,
+    required this.softGlow,
   });
   final Color color;
   final bool active;
   final double progress;
+  final bool softGlow;
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final pulse = .5 - .5 * math.cos(2 * math.pi * progress);
-    canvas.drawCircle(
-      center,
-      20,
-      Paint()
-        ..color = color.withValues(alpha: .38 + .31 * pulse)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = active ? 5.2 : 3.2
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, 6.5),
-    );
+    if (softGlow) {
+      canvas.drawCircle(
+        center,
+        20,
+        Paint()
+          ..color = color.withValues(alpha: .38 + .31 * pulse)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = active ? 5.2 : 3.2
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, 6.5),
+      );
+    }
     canvas.drawCircle(
       center,
       19,
@@ -337,5 +346,8 @@ class _TokenAuraPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _TokenAuraPainter old) =>
-      color != old.color || active != old.active || progress != old.progress;
+      color != old.color ||
+      active != old.active ||
+      progress != old.progress ||
+      softGlow != old.softGlow;
 }

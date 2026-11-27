@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'board_camera_preset.dart';
+import 'adaptive_power_policy.dart';
+import '../../core/config/game_config.dart';
 
 enum GamePowerProfile {
   performance,
@@ -35,7 +37,44 @@ class GameExperienceSettings extends ChangeNotifier {
 
   static const String powerProfileKey = 'bhive_power_profile';
 
-  GamePowerProfile powerProfile = GamePowerProfile.balanced;
+  static const automaticPowerKey = 'bhive_auto_power_enabled';
+  GamePowerProfile _selectedPowerProfile = GamePowerProfile.balanced;
+  GamePowerProfile get selectedPowerProfile => _selectedPowerProfile;
+  bool automaticPowerEnabled = GameConfig.automaticBatterySaverDefault;
+  BatteryReading? _batteryReading;
+  BatteryReading? get batteryReading => _batteryReading;
+
+  GamePowerProfile get powerProfile => adaptivePowerProfile(
+    _selectedPowerProfile,
+    _batteryReading,
+    enabled: automaticPowerEnabled,
+  );
+
+  // Preserve existing direct assignments used by legacy tests and callers.
+  set powerProfile(GamePowerProfile value) => _selectedPowerProfile = value;
+
+  void updateBatteryReading(BatteryReading? value) {
+    if (!automaticPowerEnabled) return;
+    if (_batteryReading?.level == value?.level &&
+        _batteryReading?.charging == value?.charging) {
+      return;
+    }
+    _batteryReading = value;
+    notifyListeners();
+  }
+
+  Future<void> setAutomaticPowerEnabled(bool value) async {
+    await ensureLoaded();
+    if (automaticPowerEnabled == value) return;
+    automaticPowerEnabled = value;
+    _batteryReading = null;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (!await prefs.setBool(automaticPowerKey, value)) {
+      throw StateError('Could not save automatic power preference.');
+    }
+  }
+
   bool get effectiveReducedMotion =>
       reducedMotion || powerProfile == GamePowerProfile.ultraSaver;
 
@@ -54,6 +93,9 @@ class GameExperienceSettings extends ChangeNotifier {
       powerProfile = GamePowerProfile.fromStored(
         prefs.getString(powerProfileKey),
       );
+      automaticPowerEnabled =
+          prefs.getBool(automaticPowerKey) ??
+          GameConfig.automaticBatterySaverDefault;
       effectsEnabled = prefs.getBool(soundKey) ?? true;
       final stored = prefs.getDouble(volumeKey) ?? .65;
       volume = stored.isFinite ? stored.clamp(0.0, 1.0).toDouble() : .65;
@@ -103,7 +145,7 @@ class GameExperienceSettings extends ChangeNotifier {
 
   Future<void> setPowerProfile(GamePowerProfile value) async {
     await ensureLoaded();
-    if (powerProfile == value) return;
+    if (selectedPowerProfile == value) return;
     powerProfile = value;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
@@ -115,6 +157,8 @@ class GameExperienceSettings extends ChangeNotifier {
   Future<void> restoreDefaults() async {
     await ensureLoaded();
     powerProfile = GamePowerProfile.balanced;
+    automaticPowerEnabled = GameConfig.automaticBatterySaverDefault;
+    _batteryReading = null;
     effectsEnabled = true;
     volume = .65;
     reducedMotion = false;
@@ -126,7 +170,8 @@ class GameExperienceSettings extends ChangeNotifier {
 
   Future<void> _persist() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(powerProfileKey, powerProfile.name);
+    await prefs.setString(powerProfileKey, selectedPowerProfile.name);
+    await prefs.setBool(automaticPowerKey, automaticPowerEnabled);
     await prefs.setBool(soundKey, effectsEnabled);
     await prefs.setDouble(volumeKey, volume);
     await prefs.setBool(reducedMotionKey, reducedMotion);

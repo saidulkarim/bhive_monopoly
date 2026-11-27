@@ -11,6 +11,7 @@ import '../../core/utils/currency_preferences.dart';
 import '../../l10n/generated/app_localizations.dart';
 import '../../providers/app_controller.dart';
 import '../widgets/player_avatar.dart';
+import '../../core/utils/avatar_preview_bytes.dart';
 import 'profile_screen.dart';
 import 'font_settings_screen.dart';
 import 'rules_screen.dart';
@@ -31,6 +32,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _openingGameSetup = false;
+  final _avatarPreview = AvatarPreviewBytes();
 
   Future<void> _changeLanguage(
     BuildContext context,
@@ -283,7 +285,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 children: [
                                   PlayerAvatar(
                                     preset: state.avatarIndex,
-                                    bytes: state.avatarBytes,
+                                    bytes: _avatarPreview.resolve(
+                                      state.avatarBase64,
+                                    ),
                                   ),
                                   const SizedBox(height: 20),
                                   Text(

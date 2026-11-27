@@ -51,7 +51,8 @@ class LanBoardScreen extends StatefulWidget {
   State<LanBoardScreen> createState() => _LanBoardScreenState();
 }
 
-class _LanBoardScreenState extends State<LanBoardScreen> {
+class _LanBoardScreenState extends State<LanBoardScreen>
+    with WidgetsBindingObserver {
   late final GameText t = GameText(widget.languageCode);
   final TextEditingController _bid = TextEditingController();
   final Map<int, int> _positions = <int, int>{};
@@ -117,6 +118,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
     if (!_decisionOpen || (_needsDecision && _canMakeDecision)) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final ctx = _decisionContext;
+      if (!mounted || (_needsDecision && _canMakeDecision)) return;
       if (ctx != null && ctx.mounted && ModalRoute.of(ctx)?.isCurrent == true) {
         Navigator.of(ctx).pop();
       }
@@ -236,50 +238,114 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
 
   Timer? _autoReconnectTimer;
   int _reconnectAttempts = 0;
+  bool _foreground = true;
+  late bool _wasConnected;
+  int _connectionRevision = 0;
+
+  bool get _canAutoReconnect =>
+      GameConfig.multiplayerAutoReconnectEnabled &&
+      (!GameConfig.multiplayerSuspendBackgroundRetries || _foreground) &&
+      mounted &&
+      !room.isHost &&
+      !room.rejoinUnavailable &&
+      room.playerId != null &&
+      room.started &&
+      game?.phase != TurnPhase.gameOver &&
+      !room.connected &&
+      !room.reconnecting;
+
+  void _cancelAutoReconnect() {
+    _autoReconnectTimer?.cancel();
+    _autoReconnectTimer = null;
+  }
 
   void _planAutoReconnect() {
-    // Rejoin only a previously joined, already-started room. A failed
-    // initial PIN/handshake must not become an infinite connection loop.
-    if (!mounted ||
-        room.isHost ||
-        room.playerId == null ||
-        !room.started ||
-        room.connected ||
-        room.reconnecting ||
-        _autoReconnectTimer != null) {
-      return;
-    }
+    if (!_canAutoReconnect || _autoReconnectTimer != null) return;
     final delay = LanReconnectPolicy.delayFor(_reconnectAttempts);
     if (delay == null) return;
-    _reconnectAttempts++;
     _autoReconnectTimer = Timer(delay, () {
       _autoReconnectTimer = null;
-      if (!mounted || room.connected || room.reconnecting) return;
-      unawaited(_tryReconnect());
+      if (!_canAutoReconnect) return;
+      // Spend the retry budget only when a real attempt starts.
+      _reconnectAttempts++;
+      unawaited(_tryReconnect(automatic: true));
     });
   }
 
-  Future<void> _tryReconnect() async {
-    _autoReconnectTimer?.cancel();
-    _autoReconnectTimer = null;
-    if (!mounted || room.connected || room.reconnecting) return;
+  Future<void> _tryReconnect({bool automatic = false}) async {
+    _cancelAutoReconnect();
+    if (!mounted ||
+        room.isHost ||
+        room.rejoinUnavailable ||
+        room.connected ||
+        room.reconnecting) {
+      return;
+    }
+    if (!automatic) _reconnectAttempts = 0;
     try {
       await room.reconnect();
     } catch (_) {
-      // LanRoomController already reports the connection error to the UI.
-      // Its change notification schedules the next capped retry.
-      if (mounted) _planAutoReconnect();
+      // The controller reports the error. Never resend a gameplay command.
+    } finally {
+      if (mounted) _checkConnectivity();
     }
   }
 
   void _checkConnectivity() {
-    if (room.connected) {
-      _autoReconnectTimer?.cancel();
-      _autoReconnectTimer = null;
+    if (room.rejoinUnavailable) {
+      _cancelAutoReconnect();
+    } else if (room.connected) {
+      _cancelAutoReconnect();
       _reconnectAttempts = 0;
     } else {
       _planAutoReconnect();
     }
+  }
+
+  static bool _isForeground(AppLifecycleState? state) =>
+      state == null ||
+      state == AppLifecycleState.resumed ||
+      state == AppLifecycleState.inactive;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = _isForeground(state);
+    if (GameConfig.multiplayerSuspendBackgroundRetries && !_foreground) {
+      _cancelAutoReconnect();
+    } else if (mounted) {
+      _checkConnectivity();
+    }
+  }
+
+  String get _connectionStatus {
+    if (room.rejoinUnavailable) {
+      return t.choose(
+        'Original room unavailable — leave this match',
+        'আগের রুমটি আর উপলব্ধ নেই — এই খেলা থেকে বেরিয়ে যান',
+      );
+    }
+    if (room.reconnecting) {
+      return t.choose(
+        'Reconnecting and syncing…',
+        'পুনঃসংযোগ ও তথ্য সমন্বয় চলছে…',
+      );
+    }
+    if (!room.connected) {
+      return t.choose(
+        'Match paused — connection lost',
+        'খেলা স্থগিত — সংযোগ বিচ্ছিন্ন',
+      );
+    }
+    if (room.paused) {
+      return t.choose(
+        'Waiting for other players to reconnect',
+        'অন্য খেলোয়াড়দের পুনঃসংযোগের অপেক্ষায়',
+      );
+    }
+    return t.choose(
+      'LAN match • Host-authoritative',
+      'LAN খেলা • হোস্ট নিয়ন্ত্রিত',
+    );
   }
 
   void _saveLanResultIfFinished(GameEngine? engine) {
@@ -345,6 +411,9 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
   @override
   void initState() {
     super.initState();
+    _wasConnected = room.connected;
+    _foreground = _isForeground(WidgetsBinding.instance.lifecycleState);
+    WidgetsBinding.instance.addObserver(this);
     unawaited(GameExperienceSettings.instance.ensureLoaded());
     unawaited(TokenPreferences.instance.ensureLoaded());
     _lastSequence = room.lastEvent?.sequence ?? 0;
@@ -365,7 +434,8 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
   @override
   void dispose() {
     room.removeListener(_update);
-    _autoReconnectTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _cancelAutoReconnect();
     _boardActionCooldown?.cancel();
     ++_animationEpoch;
     _bid.dispose();
@@ -376,6 +446,21 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
 
   void _update() {
     if (!mounted) return;
+    final connectionChanged = _wasConnected != room.connected;
+    _wasConnected = room.connected;
+    if (connectionChanged) {
+      ++_connectionRevision;
+      // A rejoin is a full state synchronization, not a new move event.
+      // Cancel old presentation work; never replay a historical dice roll.
+      ++_animationEpoch;
+      _moveAnimating = false;
+      _diceRolling = false;
+      _dicePreview = null;
+      _boardActionPending = false;
+      _boardActionCooldown?.cancel();
+      _autoDecisionKey = null;
+      _lastSequence = room.lastEvent?.sequence ?? 0;
+    }
     _checkConnectivity();
     if (room.errorRevision != _seenError) {
       _seenError = room.errorRevision;
@@ -394,7 +479,10 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
     if (engine != null) {
       _observeProgress(engine);
       final event = room.lastEvent;
-      if (event != null && event.sequence > _lastSequence) {
+      if (room.connected &&
+          !connectionChanged &&
+          event != null &&
+          event.sequence > _lastSequence) {
         _lastSequence = event.sequence;
         _boardActionPending = false;
         _boardActionCooldown?.cancel();
@@ -572,7 +660,6 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
       await operation;
     } catch (error, stack) {
       GameDiagnostics.record('multiplayer action', error, stack);
-      // ignore: curly_braces_in_flow_control_structures
       if (mounted) {
         AppNotices.of(context).showSnackBar(
           SnackBar(
@@ -717,7 +804,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const CircularProgressIndicator(color: kBoardGold),
+                          const Icon(Icons.sync, color: kBoardGold, size: 32),
                           const SizedBox(height: 12),
                           Text(
                             t.choose(
@@ -732,7 +819,12 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                           if (!room.connected) ...[
                             const SizedBox(height: 12),
                             FilledButton(
-                              onPressed: () => unawaited(_tryReconnect()),
+                              onPressed:
+                                  room.isHost ||
+                                      room.reconnecting ||
+                                      room.rejoinUnavailable
+                                  ? null
+                                  : () => unawaited(_tryReconnect()),
                               child: Text(
                                 t.choose('Reconnect', 'পুনরায় যুক্ত হন'),
                               ),
@@ -875,19 +967,11 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  offline
-                      ? t.choose(
-                          'Match paused — connection lost',
-                          'খেলা স্থগিত — সংযোগ বিচ্ছিন্ন',
-                        )
-                      : t.choose(
-                          'LAN match • Host-authoritative',
-                          'LAN খেলা • হোস্ট নিয়ন্ত্রিত',
-                        ),
+                  _connectionStatus,
                   style: TextStyle(fontFamily: t.font, color: Colors.white),
                 ),
               ),
-              if (!room.isHost && !room.connected)
+              if (!room.isHost && !room.connected && !room.rejoinUnavailable)
                 TextButton(
                   onPressed: room.reconnecting
                       ? null
@@ -896,7 +980,29 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                 ),
             ],
           ),
-          if (!room.isHost && !room.connected && _reconnectAttempts > 0)
+          if (!room.isHost &&
+              !room.connected &&
+              !room.rejoinUnavailable &&
+              _reconnectAttempts >= LanReconnectPolicy.maxAttempts &&
+              !room.reconnecting)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                t.choose(
+                  'Automatic retries ended. Tap Reconnect to try again.',
+                  'স্বয়ংক্রিয় চেষ্টা শেষ। আবার চেষ্টা করতে পুনঃসংযোগ চাপুন।',
+                ),
+                style: TextStyle(
+                  fontFamily: t.font,
+                  color: Colors.orangeAccent,
+                  fontSize: 12,
+                ),
+              ),
+            )
+          else if (!room.isHost &&
+              !room.connected &&
+              !room.rejoinUnavailable &&
+              _reconnectAttempts > 0)
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
@@ -1436,6 +1542,7 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
     final offered = <int>{};
     final requested = <int>{?buyIndex};
     final openedTurn = engine.turnNumber;
+    final openedConnection = _connectionRevision;
     final cashFrom = TextEditingController(
       text: buyIndex == null ? '0' : '${engine.spaces[buyIndex].price}',
     );
@@ -1662,7 +1769,8 @@ class _LanBoardScreenState extends State<LanBoardScreen> {
                       return;
                     }
                     if (submitted || !mounted) return;
-                    if (!room.isMyTurn ||
+                    if (openedConnection != _connectionRevision ||
+                        !room.isMyTurn ||
                         room.pendingTrade != null ||
                         game?.turnNumber != openedTurn) {
                       Navigator.pop(dialogContext);

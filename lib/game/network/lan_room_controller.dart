@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../../core/config/game_config.dart';
 import '../engine/game_engine.dart';
 import '../experience/player_palette.dart';
 import '../models/game_models.dart';
@@ -154,7 +155,13 @@ class LanRoomController extends ChangeNotifier {
   final String? bluetoothAddress;
   bool get isBluetoothRoom => bluetoothAddress != null;
   bool get isRelayRoom => relayUri != null;
-  Completer<void>? _relayJoinAck;
+  // A socket opening is not an authenticated connection. Complete the
+  // handshake only after host welcome + room + (for a started match) state.
+  Completer<String?>? _handshake;
+  bool _welcomed = false;
+  bool _receivedRoom = false;
+  bool _receivedState = false;
+  bool _transportLost = false;
   final LanDiscoveryService _discovery = LanDiscoveryService();
   final LanActionDispatcher _dispatcher = LanActionDispatcher();
   final LanTradeCoordinator _trade = LanTradeCoordinator();
@@ -172,6 +179,10 @@ class LanRoomController extends ChangeNotifier {
   bool started = false;
   bool paused = false;
   bool reconnecting = false;
+  bool _rejoinUnavailable = false;
+
+  /// The relay explicitly removed this room, or the host rejected its token.
+  bool get rejoinUnavailable => _rejoinUnavailable;
   int? playerId;
   String _reconnectSecret = '';
   GameEngine? game;
@@ -185,7 +196,8 @@ class LanRoomController extends ChangeNotifier {
   int get errorRevision => _errorRevision;
   List<String> get hostAddresses => _host?.addresses ?? const <String>[];
   int get connectedPlayers => _members.where((m) => m.connected).length;
-  bool get canStart => isHost && !started && connectedPlayers >= 2;
+  bool get canStart =>
+      isHost && connected && !paused && !started && connectedPlayers >= 2;
   bool get isMyTurn =>
       started &&
       !paused &&
@@ -292,7 +304,7 @@ class LanRoomController extends ChangeNotifier {
     try {
       await room._connect();
     } catch (_) {
-      await room._discovery.close();
+      await room.shutdown();
       rethrow;
     }
     return room;
@@ -430,6 +442,7 @@ class LanRoomController extends ChangeNotifier {
           if (room._closed) return;
           room.connected = false;
           room.paused = true;
+          room._rejoinUnavailable = true;
           room._error('Relay disconnected. The host must create a new room.');
         },
       );
@@ -506,8 +519,13 @@ class LanRoomController extends ChangeNotifier {
   }
 
   void _broadcast(Map<String, dynamic> packet) {
+    // Encode once for every connected guest, rather than once per recipient.
+    // Keep the wire payload and delivery order unchanged.
+    String? payload;
     for (final member in _members.skip(1)) {
-      _sendToGuest(member, packet);
+      if (member.connected && member.connection != null) {
+        _host?.send(member.connection!, payload ??= jsonEncode(packet));
+      }
     }
   }
 
@@ -851,135 +869,176 @@ class LanRoomController extends ChangeNotifier {
       });
 
   Future<void> _sendPacket(Map<String, dynamic> packet) async {
-    if (_closed || !connected || paused || !started) {
+    if (_closed || !connected || paused || !started || game == null) {
       _error('Room unavailable or waiting for another player to reconnect.');
       return;
     }
     if (isHost) {
       _execute(0, packet);
     } else {
+      final epoch = _connectionEpoch;
       try {
         final payload = jsonEncode(packet);
         if (isBluetoothRoom) {
-          await _bluetoothClient?.send(payload);
-        } else if (isRelayRoom) {
-          _channel?.sink.add(
-            jsonEncode(<String, dynamic>{
-              'kind': 'to_host',
-              'payload': payload,
-            }),
-          );
+          final client = _bluetoothClient;
+          if (client == null) {
+            throw StateError('Bluetooth transport unavailable.');
+          }
+          await client.send(payload);
         } else {
-          _channel?.sink.add(payload);
+          final channel = _channel;
+          if (channel == null) throw StateError('WebSocket unavailable.');
+          channel.sink.add(
+            isRelayRoom
+                ? jsonEncode(<String, dynamic>{
+                    'kind': 'to_host',
+                    'payload': payload,
+                  })
+                : payload,
+          );
         }
       } catch (_) {
-        _error('Connection failed. Rejoin the room.');
+        // Never replay an action whose delivery/commit outcome is unknown.
+        _onClientLost(epoch);
       }
     }
   }
 
   Future<void> _connect() async {
-    if (isBluetoothRoom) {
-      await _connectBluetooth();
-      return;
-    }
-    final currentEpoch = ++_connectionEpoch;
+    if (_closed) return;
+    final epoch = ++_connectionEpoch;
+    connected = false;
     reconnecting = true;
+    paused = true;
+    _welcomed = false;
+    _receivedRoom = false;
+    _receivedState = false;
+    _transportLost = false;
+    final handshake = Completer<String?>();
+    _handshake = handshake;
     _notify();
-    final uri =
-        relayUri ?? Uri(scheme: 'ws', host: hostIp, port: port, path: '/');
-    // Do not create the relay acknowledgement Future until the WebSocket is
-    // open. If the socket fails before channel.ready, completing that Future
-    // with an error would be unhandled because nothing is awaiting it yet.
     try {
-      var disconnectedDuringConnect = false;
-      final channel = WebSocketChannel.connect(uri);
-      _channel = channel;
-      _subscription = channel.stream.listen(
-        (message) {
-          if (currentEpoch != _connectionEpoch || _closed) return;
-          _onClientMessage(message);
-        },
-        onDone: () {
-          disconnectedDuringConnect = true;
-          _onClientLost(currentEpoch);
-        },
-        onError: (_) {
-          disconnectedDuringConnect = true;
-          _onClientLost(currentEpoch);
-        },
-        cancelOnError: true,
-      );
-      await channel.ready.timeout(const Duration(seconds: 8));
-      if (_closed || currentEpoch != _connectionEpoch) return;
-      if (disconnectedDuringConnect) {
-        throw StateError(
-          'Relay WebSocket closed before the room handshake. '
-          'Check the server address, network access, and server console.',
+      if (isBluetoothRoom) {
+        final client = BluetoothGuestConnection();
+        _bluetoothClient = client;
+        _listenClient(client.messages, epoch);
+        // The Android native call cannot safely be cancelled by Dart Future
+        // timeout. Keep the single-flight lock until that call settles.
+        await client.connect(bluetoothAddress!);
+        if (_closed || epoch != _connectionEpoch) return;
+        if (_transportLost) {
+          throw StateError('Host connection lost. Reconnect to continue.');
+        }
+        await client.send(jsonEncode(_helloPacket()));
+      } else {
+        final uri =
+            relayUri ?? Uri(scheme: 'ws', host: hostIp, port: port, path: '/');
+        final channel = WebSocketChannel.connect(uri);
+        _channel = channel;
+        _listenClient(channel.stream, epoch);
+        await channel.ready.timeout(
+          const Duration(
+            seconds: GameConfig.multiplayerSocketOpenTimeoutSeconds,
+          ),
         );
+        if (_closed || epoch != _connectionEpoch) return;
+        if (_transportLost) {
+          throw StateError('Host connection lost. Reconnect to continue.');
+        }
+        if (isRelayRoom) {
+          channel.sink.add(
+            jsonEncode(<String, dynamic>{'kind': 'join', 'room': pin}),
+          );
+        } else {
+          _sendHello(channel);
+        }
       }
+      final failure = await handshake.future.timeout(
+        const Duration(seconds: GameConfig.multiplayerHandshakeTimeoutSeconds),
+        onTimeout: () =>
+            'Host synchronization timed out. Reconnect to continue.',
+      );
+      if (_closed || epoch != _connectionEpoch) return;
+      if (failure != null) throw StateError(failure);
+      if (_transportLost) {
+        throw StateError('Host connection lost. Reconnect to continue.');
+      }
+      // Only now may the UI send new commands. No queued actions are replayed.
       connected = true;
       reconnecting = false;
-      if (isRelayRoom) {
-        // Create and immediately await the join acknowledgement only *after*
-        // the socket has opened, so close/error callbacks cannot complete an
-        // orphaned Completer with an unhandled StateError.
-        final joinAck = Completer<void>();
-        _relayJoinAck = joinAck;
-        channel.sink.add(
-          jsonEncode(<String, dynamic>{'kind': 'join', 'room': pin}),
-        );
-        await joinAck.future.timeout(const Duration(seconds: 8));
-        if (identical(_relayJoinAck, joinAck)) _relayJoinAck = null;
-      } else {
-        _sendHello(channel);
-      }
+      _handshake = null;
       _notify();
     } catch (error) {
-      if (currentEpoch != _connectionEpoch) return;
+      if (_closed || epoch != _connectionEpoch) return;
+      // Reject all late callbacks before cleanup; retain the reconnect lock
+      // until the old transport is released.
+      ++_connectionEpoch;
+      _handshake = null;
       connected = false;
+      paused = true;
+      try {
+        await _closeGuestTransport();
+      } catch (_) {
+        // Report the original connection failure, not a secondary close error.
+      }
+      if (_closed) return;
       reconnecting = false;
-      await _subscription?.cancel();
-      _subscription = null;
-      await _channel?.sink.close();
-      _channel = null;
-      _relayJoinAck = null;
-      _error('Could not connect to ${relayUri ?? '$hostIp:$port'} — $error');
-      rethrow;
+      final message = error is StateError
+          ? error.message.toString()
+          : (isBluetoothRoom
+                ? 'Bluetooth connection failed: ${error.runtimeType}'
+                : 'Could not connect to the host.');
+      _error(message);
+      throw StateError(message);
     }
   }
 
-  Future<void> _connectBluetooth() async {
-    final epoch = ++_connectionEpoch;
-    reconnecting = true;
-    _notify();
-    final client = BluetoothGuestConnection();
-    _bluetoothClient = client;
-    _subscription = client.messages.listen(
+  void _listenClient(Stream<dynamic> stream, int epoch) {
+    _subscription = stream.listen(
       (message) {
-        if (!_closed && epoch == _connectionEpoch) _onClientMessage(message);
+        if (_closed || epoch != _connectionEpoch || _transportLost) return;
+        _onClientMessage(message);
       },
       onDone: () => _onClientLost(epoch),
       onError: (Object _) => _onClientLost(epoch),
       cancelOnError: true,
     );
+  }
+
+  Future<void> _closeGuestTransport() async {
+    final subscription = _subscription;
+    final channel = _channel;
+    final bluetooth = _bluetoothClient;
+    _subscription = null;
+    _channel = null;
+    _bluetoothClient = null;
     try {
-      await client.connect(bluetoothAddress!);
-      if (_closed || epoch != _connectionEpoch) return;
-      connected = true;
-      reconnecting = false;
-      await client.send(jsonEncode(_helloPacket()));
-      _notify();
-    } catch (error) {
-      if (epoch != _connectionEpoch) return;
-      connected = false;
-      reconnecting = false;
-      await _subscription?.cancel();
-      _subscription = null;
-      await client.close();
-      _bluetoothClient = null;
-      _error('Bluetooth connection failed: $error');
-      rethrow;
+      await subscription?.cancel();
+    } catch (_) {}
+    try {
+      if (channel != null) {
+        await channel.sink.close().timeout(
+          const Duration(
+            seconds: GameConfig.multiplayerSocketCloseTimeoutSeconds,
+          ),
+        );
+      }
+    } catch (_) {}
+    // Do not start a new Bluetooth connection until native stop has settled.
+    await bluetooth?.close();
+  }
+
+  void _completeHandshake(String? failure) {
+    final handshake = _handshake;
+    if (failure != null) _transportLost = true;
+    if (handshake != null && !handshake.isCompleted) {
+      handshake.complete(failure);
+    }
+  }
+
+  void _maybeCompleteHandshake() {
+    if (_welcomed && _receivedRoom && (!started || _receivedState)) {
+      _completeHandshake(null);
     }
   }
 
@@ -1002,60 +1061,96 @@ class LanRoomController extends ChangeNotifier {
     );
   }
 
-  void _onClientLost(int epoch) {
-    if (_closed || epoch != _connectionEpoch) return;
+  void _onClientLost(
+    int epoch, {
+    String message = 'Host connection lost. Reconnect to continue.',
+  }) {
+    if (_closed || epoch != _connectionEpoch || _transportLost) return;
+    _transportLost = true;
     connected = false;
-    reconnecting = false;
     paused = true;
-    if (_relayJoinAck?.isCompleted == false) {
-      _relayJoinAck!.completeError(StateError('Relay connection lost.'));
+    if (reconnecting) {
+      // The connecting coroutine owns cleanup and releases its lock.
+      _completeHandshake(message);
+      return;
     }
-    _error('Host connection lost. Reconnect to continue.');
+    ++_connectionEpoch;
+    _error(message);
   }
 
   void _onClientMessage(dynamic raw) {
     try {
       final data = jsonDecode(raw as String) as Map<String, dynamic>;
       if (isRelayRoom && data['kind'] == 'joined') {
+        if (!reconnecting || _welcomed) return;
         final channel = _channel;
         if (channel != null) _sendHello(channel);
-        if (_relayJoinAck?.isCompleted == false) _relayJoinAck!.complete();
         return;
       }
       if (isRelayRoom && data['kind'] == 'error') {
         final message =
             data['message']?.toString() ?? 'Cannot join relay room.';
-        if (_relayJoinAck?.isCompleted == false) {
-          _relayJoinAck!.completeError(StateError(message));
+        if (reconnecting) {
+          if (started && message == 'Room not found. Check the room code.') {
+            _rejoinUnavailable = true;
+          }
+          _completeHandshake(message);
+        } else {
+          _error(message);
         }
-        _error(message);
         return;
       }
       switch (data['type']) {
         case 'welcome':
-          playerId = data['id'] as int;
-          _reconnectSecret = data['token'] as String;
-          connected = true;
+          final id = data['id'];
+          final token = data['token'];
+          if (id is! int ||
+              id < 0 ||
+              id >= 6 ||
+              token is! String ||
+              token.isEmpty ||
+              (started &&
+                  _reconnectSecret.isNotEmpty &&
+                  (id != playerId || token != _reconnectSecret))) {
+            throw const FormatException('Invalid room identity.');
+          }
+          playerId = id;
+          _reconnectSecret = token;
+          _welcomed = true;
           break;
         case 'room':
+          if (reconnecting && !_welcomed) {
+            throw const FormatException('Missing welcome.');
+          }
+          final incomingStarted = data['started'] as bool;
+          final incomingPaused = data['paused'] as bool;
+          final incomingMembers = (data['members'] as List).map((entry) {
+            final m = entry as Map<String, dynamic>;
+            return LanMember(
+              id: m['id'] as int,
+              name: m['name'] as String,
+              connected: m['connected'] as bool,
+              avatarIndex: LanAvatarCodec.preset(m['avatarIndex']),
+              avatarBytes: LanAvatarCodec.decode(m['avatarData']),
+            );
+          }).toList();
+          if (incomingMembers.isEmpty ||
+              incomingMembers.length > 6 ||
+              (started && !incomingStarted) ||
+              !incomingMembers.any((m) => m.id == playerId && m.connected)) {
+            throw const FormatException('Invalid room membership.');
+          }
           _members
             ..clear()
-            ..addAll(
-              (data['members'] as List).map((entry) {
-                final m = entry as Map<String, dynamic>;
-                return LanMember(
-                  id: m['id'] as int,
-                  name: m['name'] as String,
-                  connected: m['connected'] as bool,
-                  avatarIndex: LanAvatarCodec.preset(m['avatarIndex']),
-                  avatarBytes: LanAvatarCodec.decode(m['avatarData']),
-                );
-              }),
-            );
-          started = data['started'] as bool;
-          paused = data['paused'] as bool;
+            ..addAll(incomingMembers);
+          started = incomingStarted;
+          paused = incomingPaused;
+          _receivedRoom = true;
           break;
         case 'state':
+          if (reconnecting && (!_welcomed || !_receivedRoom)) {
+            throw const FormatException('Missing room handshake.');
+          }
           // Parse the complete envelope before mutating any game fields.
           // LanGameCodec also validates the entire board before applying it.
           final snapshot = data['state'] as Map<String, dynamic>;
@@ -1080,46 +1175,83 @@ class LanRoomController extends ChangeNotifier {
           paused = incomingPaused;
           _trade.pending = incomingTrade;
           lastEvent = incomingEvent;
+          _receivedState = true;
           break;
         case 'error':
-          _error(data['message'] as String? ?? 'Unknown network error.');
+          final message =
+              data['message'] as String? ?? 'Unknown network error.';
+          if (isRelayRoom &&
+              message == 'The room host disconnected. This room is closed.') {
+            _rejoinUnavailable = true;
+            _onClientLost(_connectionEpoch, message: message);
+          } else if (reconnecting) {
+            if (started &&
+                message ==
+                    'Match in progress. Only disconnected players may rejoin.') {
+              _rejoinUnavailable = true;
+            }
+            _completeHandshake(message);
+          } else {
+            _error(message);
+          }
           return;
       }
-      _notify();
+      if (reconnecting) {
+        _maybeCompleteHandshake();
+      } else {
+        _notify();
+      }
     } catch (_) {
-      _error('Received an invalid game update from the host.');
+      const message = 'Received an invalid game update from the host.';
+      if (reconnecting) {
+        _completeHandshake(message);
+      } else {
+        // The client cannot safely act on a stale projection. Require a new
+        // authoritative snapshot via authenticated rejoin.
+        _onClientLost(_connectionEpoch, message: message);
+      }
     }
   }
 
   Future<void> reconnect() async {
-    if (isHost || _closed || reconnecting || connected) return;
-    await _subscription?.cancel();
-    _subscription = null;
+    if (isHost || _closed || _rejoinUnavailable || reconnecting || connected) {
+      return;
+    }
+    // Acquire synchronously, before the first await (including socket close).
+    reconnecting = true;
+    ++_connectionEpoch;
+    _notify();
     try {
-      await _channel?.sink.close();
-    } catch (_) {}
-    _channel = null;
-    await _bluetoothClient?.close();
-    _bluetoothClient = null;
-    await _connect();
+      await _closeGuestTransport();
+    } catch (_) {
+      if (!_closed) {
+        reconnecting = false;
+        _error('Connection failed. Rejoin the room.');
+      }
+      rethrow;
+    }
+    if (!_closed) await _connect();
   }
 
   Future<void> shutdown() async {
     if (_closed) return;
     _closed = true;
-    _relayJoinAck = null;
     ++_connectionEpoch;
-    await _subscription?.cancel();
-    _subscription = null;
+    _completeHandshake('Room closed.');
+    _handshake = null;
     try {
-      await _channel?.sink.close();
-    } catch (_) {}
-    _channel = null;
-    await _bluetoothClient?.close();
-    _bluetoothClient = null;
-    await _host?.close();
-    _host = null;
-    await _discovery.close();
-    super.dispose();
+      await _closeGuestTransport();
+    } finally {
+      try {
+        await _host?.close();
+      } finally {
+        _host = null;
+        try {
+          await _discovery.close();
+        } finally {
+          super.dispose();
+        }
+      }
+    }
   }
 }

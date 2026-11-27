@@ -284,7 +284,7 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
       }
       _room = room..addListener(_onRoomChange);
       unawaited(_discovery.stopBrowsing());
-      setState(() {});
+      _onRoomChange();
     } catch (error) {
       _showError(error.toString());
     } finally {
@@ -943,8 +943,16 @@ class _LanLobbyScreenState extends State<LanLobbyScreen> {
                   : Colors.orangeAccent,
             ),
           ),
-        if (room.members.isEmpty)
-          const LinearProgressIndicator(color: kBoardGold),
+        if (!room.connected)
+          Text(
+            t.choose(
+              'Connection lost. Leave the room and join again.',
+              'সংযোগ বিচ্ছিন্ন হয়েছে। রুম ছেড়ে আবার যোগ দিন।',
+            ),
+            style: TextStyle(fontFamily: t.font, color: Colors.orangeAccent),
+          )
+        else if (room.members.isEmpty)
+          const Icon(Icons.sync, color: kBoardGold),
         const SizedBox(height: 17),
         if (room.isHost) ...[
           FilledButton.icon(

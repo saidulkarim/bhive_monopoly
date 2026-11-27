@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../network/lan_room_controller.dart';
+import '../../../core/ui/graphics_resource_policy.dart';
 
 /// Displays the shared profile JPEG/PNG or a deterministic six-icon preset.
 /// Also works when a peer uses Phase 6 without a custom photo.
@@ -41,8 +42,12 @@ class LanAvatarBadge extends StatelessWidget {
                   size: radius * 1.25,
                   color: const Color(0xFF142728),
                 )
-              : Image.memory(
-                  bytes,
+              : Image(
+                  image: GraphicsResourcePolicy.smallImage(
+                    context,
+                    MemoryImage(bytes),
+                    radius * 1.85,
+                  ),
                   fit: BoxFit.cover,
                   errorBuilder: (context, error, stack) => Icon(
                     icons[index],

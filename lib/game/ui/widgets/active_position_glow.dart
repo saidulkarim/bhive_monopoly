@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../core/ui/visual_activity_scope.dart';
+import '../../../core/ui/graphics_resource_policy.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 
 /// A conspicuous but non-blocking position highlight for EVERY player.
@@ -69,6 +70,7 @@ class _ActivePositionGlowState extends State<ActivePositionGlow>
         !widget.reducedMotion &&
         widget.pulseCycles > 0 &&
         VisualActivityScope.isForegroundOf(context) &&
+        VisualActivityScope.allowsIdleDecorationOf(context) &&
         TickerMode.of(context) &&
         ModalRoute.isCurrentOf(context) != false &&
         !(MediaQuery.maybeOf(context)?.disableAnimations ?? false);
@@ -105,6 +107,7 @@ class _ActivePositionGlowState extends State<ActivePositionGlow>
               isCurrentTurn: widget.isCurrentTurn,
               progress: (_controller.value * widget.pulseCycles) % 1,
               staticEffect: _allowed != true || _controller.value >= 1,
+              softGlow: GraphicsResourcePolicy.useSoftGlow(widget.pulseCycles),
             ),
             child: const SizedBox.expand(),
           ),
@@ -121,6 +124,7 @@ class _PositionGlowPainter extends CustomPainter {
     required this.isCurrentTurn,
     required this.progress,
     required this.staticEffect,
+    required this.softGlow,
   });
 
   final List<Color> colors;
@@ -128,6 +132,7 @@ class _PositionGlowPainter extends CustomPainter {
   final bool isCurrentTurn;
   final double progress;
   final bool staticEffect;
+  final bool softGlow;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -148,7 +153,7 @@ class _PositionGlowPainter extends CustomPainter {
 
     // A stronger active-turn aura is visible even after the 1000px board is
     // scaled onto a small phone. Other players keep their quieter colors.
-    if (isCurrentTurn) {
+    if (isCurrentTurn && softGlow) {
       canvas.drawRRect(
         frame.inflate(1),
         Paint()
@@ -169,16 +174,18 @@ class _PositionGlowPainter extends CustomPainter {
         ),
     );
 
-    canvas.drawRRect(
-      frame,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 6.5
-        ..color = primary.withValues(
-          alpha: isCurrentTurn ? .42 + .32 * pulse : .28 + .24 * pulse,
-        )
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, 5 + pulse * 4),
-    );
+    if (softGlow) {
+      canvas.drawRRect(
+        frame,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 6.5
+          ..color = primary.withValues(
+            alpha: isCurrentTurn ? .42 + .32 * pulse : .28 + .24 * pulse,
+          )
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, 5 + pulse * 4),
+      );
+    }
 
     // A moving translucent highlight across the tile for all players.
     if (!staticEffect) {
@@ -266,6 +273,7 @@ class _PositionGlowPainter extends CustomPainter {
     if (previous.progress != progress ||
         previous.primary != primary ||
         previous.staticEffect != staticEffect ||
+        previous.softGlow != softGlow ||
         previous.isCurrentTurn != isCurrentTurn ||
         previous.colors.length != colors.length) {
       return true;
